@@ -1,0 +1,473 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>磁力聚合搜索</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%235b8cff'/%3E%3Ccircle cx='16' cy='16' r='7' fill='none' stroke='white' stroke-width='2.5'/%3E%3C/svg%3E">
+<style>
+:root {
+  --bg: #0f1115;
+  --panel: #171a21;
+  --panel-2: #1d212a;
+  --border: #2a2f3a;
+  --text: #e6e9ef;
+  --muted: #8b93a3;
+  --accent: #5b8cff;
+  --accent-dim: #2a3d6b;
+  --alive: #3fb950;
+  --cold: #d29922;
+  --dead: #f85149;
+  --unknown: #6e7681;
+  --radius: 10px;
+  --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: light) {
+  :root {
+    --bg: #f6f7f9; --panel: #ffffff; --panel-2: #f0f2f5; --border: #dfe3e8;
+    --text: #1a1d23; --muted: #6b7280; --accent: #2563eb; --accent-dim: #c7d7fe;
+  }
+}
+* { box-sizing: border-box; }
+html, body { height: 100%; }
+body {
+  margin: 0; background: var(--bg); color: var(--text);
+  font: 14px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+  display: flex; flex-direction: column;
+}
+a { color: var(--accent); text-decoration: none; }
+button { font: inherit; color: inherit; background: none; border: none; cursor: pointer; }
+
+/* 顶栏 */
+header {
+  display: flex; align-items: center; gap: 16px;
+  padding: 12px 20px; background: var(--panel); border-bottom: 1px solid var(--border);
+  position: sticky; top: 0; z-index: 20;
+}
+.brand { display: flex; align-items: center; gap: 9px; font-weight: 650; letter-spacing: .2px; white-space: nowrap; }
+.brand .logo {
+  width: 22px; height: 22px; border-radius: 6px;
+  background: linear-gradient(135deg, var(--accent), #a855f7);
+  display: grid; place-items: center; font-size: 12px; color: #fff;
+}
+.health { margin-left: auto; display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 12.5px; }
+.health .dots { display: flex; gap: 4px; }
+.health .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--unknown); }
+.health .dot.ok { background: var(--alive); }
+.health .dot.bad { background: var(--dead); }
+.health button { color: var(--muted); text-decoration: underline dotted; }
+.health button:hover { color: var(--text); }
+
+/* 搜索区 */
+.searchwrap { padding: 18px 20px 0; }
+.searchbar { display: flex; gap: 10px; }
+.searchbar input {
+  flex: 1; min-width: 0; padding: 12px 14px; font-size: 15px;
+  background: var(--panel); color: var(--text);
+  border: 1px solid var(--border); border-radius: var(--radius); outline: none;
+}
+.searchbar input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-dim); }
+.searchbar button {
+  padding: 0 22px; background: var(--accent); color: #fff; font-weight: 600;
+  border-radius: var(--radius); white-space: nowrap;
+}
+.searchbar button:hover { filter: brightness(1.08); }
+.searchbar button:disabled { opacity: .6; cursor: progress; }
+
+/* 筛选栏 */
+.filters {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px;
+  padding: 12px 2px; font-size: 13px; color: var(--muted);
+}
+.filters .grp { display: flex; align-items: center; gap: 6px; }
+.filters label { white-space: nowrap; }
+.filters select, .filters input[type=number] {
+  background: var(--panel); color: var(--text); border: 1px solid var(--border);
+  border-radius: 7px; padding: 4px 7px; font: inherit; font-size: 12.5px; outline: none;
+}
+.filters input[type=number] { width: 62px; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.chip {
+  padding: 3px 10px; border-radius: 999px; border: 1px solid var(--border);
+  background: var(--panel); font-size: 12.5px; color: var(--muted); cursor: pointer;
+  display: inline-flex; align-items: center; gap: 5px;
+}
+.chip.on { background: var(--accent-dim); border-color: var(--accent); color: var(--text); }
+.chip .rdot { width: 6px; height: 6px; border-radius: 50%; background: var(--muted); }
+.chip.on .rdot { background: var(--accent); }
+.chip.overseas .rdot { background: var(--cold); }
+.toggle { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; user-select: none; }
+.toggle input { accent-color: var(--accent); }
+
+/* 结果区 */
+main { flex: 1; padding: 4px 20px 28px; }
+.status { color: var(--muted); font-size: 12.5px; padding: 6px 2px 10px; display: flex; gap: 14px; flex-wrap: wrap; align-items: center; }
+.status .warn { color: var(--cold); }
+.results { display: flex; flex-direction: column; gap: 8px; }
+.card {
+  background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius);
+  padding: 12px 14px; display: grid; grid-template-columns: 34px 1fr auto; gap: 12px; align-items: start;
+}
+.card:hover { border-color: #39404e; }
+.rank { color: var(--muted); font: 600 13px var(--mono); text-align: right; padding-top: 2px; }
+.main { min-width: 0; }
+.title { font-weight: 550; word-break: break-word; }
+.meta { color: var(--muted); font-size: 12.5px; margin-top: 3px; display: flex; flex-wrap: wrap; gap: 4px 12px; }
+.meta b { color: var(--text); font-weight: 550; }
+.src { border: 1px solid var(--border); border-radius: 5px; padding: 0 5px; font-size: 11.5px; }
+.side { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; }
+.badge {
+  font-size: 11.5px; font-weight: 600; padding: 2px 9px; border-radius: 999px;
+  border: 1px solid transparent; white-space: nowrap;
+}
+.badge.alive { color: var(--alive); background: rgba(63,185,80,.12); border-color: rgba(63,185,80,.35); }
+.badge.cold { color: var(--cold); background: rgba(210,153,34,.12); border-color: rgba(210,153,34,.35); }
+.badge.dead { color: var(--dead); background: rgba(248,81,73,.12); border-color: rgba(248,81,73,.35); }
+.badge.unknown { color: var(--unknown); background: rgba(110,118,129,.12); border-color: rgba(110,118,129,.35); }
+.bar { width: 180px; height: 5px; border-radius: 3px; background: var(--panel-2); overflow: hidden; display: flex; }
+.bar i { display: block; height: 100%; }
+.bar .b-rel { background: var(--accent); }
+.bar .b-life { background: var(--alive); }
+.bar .b-swarm { background: var(--cold); }
+.bar .b-fresh { background: #a855f7; }
+.rowbtns { display: flex; gap: 6px; }
+.mini {
+  font-size: 12px; color: var(--muted); border: 1px solid var(--border);
+  border-radius: 6px; padding: 2px 8px;
+}
+.mini:hover { color: var(--text); border-color: var(--accent); }
+.rarestar { color: var(--cold); font-size: 12px; }
+
+.empty { color: var(--muted); text-align: center; padding: 60px 0; }
+.empty .big { font-size: 15px; margin-bottom: 6px; color: var(--text); }
+.spinner {
+  width: 15px; height: 15px; border: 2px solid var(--border); border-top-color: var(--accent);
+  border-radius: 50%; display: inline-block; vertical-align: -2px; animation: spin .7s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* 详情抽屉 */
+.drawer {
+  position: fixed; top: 0; right: 0; bottom: 0; width: min(560px, 100%);
+  background: var(--panel); border-left: 1px solid var(--border);
+  transform: translateX(100%); transition: transform .18s ease; z-index: 40;
+  overflow-y: auto; padding: 18px 20px 40px;
+}
+.drawer.open { transform: none; }
+.drawer h3 { margin: 0 0 4px; font-size: 15px; }
+.drawer .kv { display: grid; grid-template-columns: 96px 1fr; gap: 4px 12px; font-size: 12.5px; margin-top: 14px; }
+.drawer .kv dt { color: var(--muted); }
+.drawer .kv dd { margin: 0; word-break: break-all; font-family: var(--mono); font-size: 12px; }
+.parts { margin-top: 16px; }
+.parts .row { display: grid; grid-template-columns: 72px 1fr 48px; gap: 8px; align-items: center; font-size: 12.5px; margin-bottom: 5px; }
+.parts .track { height: 6px; background: var(--panel-2); border-radius: 3px; overflow: hidden; }
+.parts .track i { display: block; height: 100%; }
+.parts .val { text-align: right; font-family: var(--mono); font-size: 12px; color: var(--muted); }
+.copyrow { display: flex; gap: 8px; margin-top: 16px; }
+.copyrow input {
+  flex: 1; min-width: 0; background: var(--panel-2); border: 1px solid var(--border);
+  color: var(--text); border-radius: 7px; padding: 8px 10px; font: 12px var(--mono);
+}
+.mask { position: fixed; inset: 0; background: rgba(0,0,0,.35); z-index: 35; display: none; }
+.mask.open { display: block; }
+.hint { color: var(--muted); font-size: 12px; margin-top: 14px; line-height: 1.7; }
+.toast {
+  position: fixed; bottom: 22px; left: 50%; transform: translateX(-50%);
+  background: var(--panel); border: 1px solid var(--accent); color: var(--text);
+  padding: 8px 16px; border-radius: 999px; font-size: 13px; opacity: 0; pointer-events: none;
+  transition: opacity .2s; z-index: 60;
+}
+.toast.show { opacity: 1; }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="brand"><span class="logo">⬢</span>磁力聚合搜索</div>
+  <div class="health">
+    <span class="dots" id="healthDots"></span>
+    <span id="healthText">引擎状态未知</span>
+    <button id="healthBtn" type="button">检测</button>
+  </div>
+</header>
+
+<div class="searchwrap">
+  <div class="searchbar">
+    <input id="q" type="search" placeholder="输入关键词，例如：ubuntu 24.04、葬送のフリーレン、Matrix" autocomplete="off" spellcheck="false">
+    <button id="go" type="button">搜索</button>
+  </div>
+  <div class="filters">
+    <div class="grp">
+      <label>引擎</label>
+      <div class="chips" id="engineChips"></div>
+    </div>
+    <div class="grp">
+      <label>死链</label>
+      <select id="deadFilter">
+        <option value="hide">隐藏</option>
+        <option value="mark">标记</option>
+        <option value="strict">严格</option>
+        <option value="off">不过滤</option>
+      </select>
+    </div>
+    <div class="grp">
+      <label>最少对等端</label>
+      <input id="minPeers" type="number" min="0" value="0">
+    </div>
+    <div class="grp">
+      <label>冷门席位</label>
+      <select id="rareQuota">
+        <option value="-1">自动</option>
+        <option value="0">关闭</option>
+        <option value="2">2</option>
+        <option value="4">4</option>
+        <option value="6">6</option>
+      </select>
+    </div>
+    <div class="grp">
+      <label>每簇最多</label>
+      <input id="perCluster" type="number" min="0" value="2">
+    </div>
+    <div class="grp">
+      <label class="toggle"><input id="probe" type="checkbox" checked>网络存活探测</label>
+    </div>
+  </div>
+</div>
+
+<main>
+  <div class="status" id="status">
+    <span>输入关键词开始搜索。按 <b>/</b> 聚焦搜索框。</span>
+  </div>
+  <div class="results" id="results"></div>
+</main>
+
+<div class="mask" id="mask"></div>
+<aside class="drawer" id="drawer">
+  <h3 id="dTitle">详情</h3>
+  <div class="meta" id="dMeta"></div>
+  <div class="copyrow">
+    <input id="dMagnet" readonly>
+    <button class="mini" id="dCopy" type="button">复制磁力</button>
+  </div>
+  <div class="parts" id="dParts"></div>
+  <dl class="kv" id="dKv"></dl>
+  <div class="hint" id="dHint"></div>
+</aside>
+<div class="toast" id="toast"></div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+let engines = [];
+let activeEngines = new Set();
+
+const VERDICT = {
+  alive:   { cls: "alive",   text: "活跃" },
+  cold:    { cls: "cold",    text: "冷门" },
+  dead:    { cls: "dead",    text: "死链" },
+  unknown: { cls: "unknown", text: "未知" },
+};
+const PART_COLOR = { relevance: "var(--accent)", life: "var(--alive)", swarm: "var(--cold)", freshness: "#a855f7" };
+const PART_NAME  = { relevance: "相关度", life: "存活证据", swarm: "群体规模", freshness: "新鲜度" };
+
+function toast(msg) {
+  const t = $("toast");
+  t.textContent = msg;
+  t.classList.add("show");
+  clearTimeout(t._timer);
+  t._timer = setTimeout(() => t.classList.remove("show"), 1600);
+}
+
+function fmtSize(bytes) {
+  if (!bytes || bytes < 0) return "-";
+  const units = ["B", "KB", "MB", "GB", "TB"];
+  let v = bytes, i = 0;
+  while (v >= 1024 && i < units.length - 1) { v /= 1024; i++; }
+  return (i === 0 ? v : v.toFixed(1)) + " " + units[i];
+}
+
+async function loadEngines() {
+  try {
+    engines = await (await fetch("/api/engines")).json();
+  } catch (e) {
+    engines = [];
+  }
+  const box = $("engineChips");
+  box.innerHTML = "";
+  engines.forEach((e) => {
+    const chip = document.createElement("button");
+    chip.type = "button";
+    chip.className = "chip on " + (e.region === "overseas" ? "overseas" : "");
+    chip.innerHTML = `<span class="rdot"></span>${e.name}`;
+    chip.title = `${e.description}（${e.region === "overseas" ? "境外，优先走代理" : "通用"}）`;
+    chip.onclick = () => {
+      if (activeEngines.has(e.name)) { activeEngines.delete(e.name); chip.classList.remove("on"); }
+      else { activeEngines.add(e.name); chip.classList.add("on"); }
+    };
+    box.appendChild(chip);
+    activeEngines.add(e.name);
+  });
+}
+
+async function checkHealth() {
+  const dots = $("healthDots");
+  $("healthText").textContent = "检测中…";
+  dots.innerHTML = "";
+  try {
+    const data = await (await fetch("/api/check")).json();
+    let ok = 0;
+    data.engines.forEach((e) => {
+      const d = document.createElement("span");
+      d.className = "dot " + (e.ok ? "ok" : "bad");
+      d.title = `${e.name}：${e.ok ? "可用，" + e.count + " 条" : "不可用 —— " + (e.error || "")}`;
+      dots.appendChild(d);
+      if (e.ok) ok++;
+    });
+    $("healthText").textContent = `${ok}/${data.engines.length} 个引擎可用`;
+  } catch (e) {
+    $("healthText").textContent = "检测失败";
+  }
+}
+
+function renderStatus(data) {
+  const s = $("status");
+  const bits = [];
+  bits.push(`<span>${data.count} 条结果</span>`);
+  if (data.dropped) bits.push(`<span>过滤 ${data.dropped} 条</span>`);
+  bits.push(`<span>${(data.elapsed_ms / 1000).toFixed(1)}s</span>`);
+  const engines = Object.entries(data.per_engine || {}).map(([k, v]) => `${k} ${v}`).join(" · ");
+  if (engines) bits.push(`<span>${engines}</span>`);
+  if (!data.probe_available && data.probe_reason) bits.push(`<span class="warn">${data.probe_reason}</span>`);
+  if (data.failures && data.failures.length) {
+    bits.push(`<span class="warn">${data.failures.map((f) => f.engine).join(" ")} 失败</span>`);
+  }
+  s.innerHTML = bits.join("");
+}
+
+function renderResults(items) {
+  const box = $("results");
+  box.innerHTML = "";
+  if (!items.length) {
+    box.innerHTML = `<div class="empty"><div class="big">没有符合条件的结果</div>
+      <div>试试放宽筛选条件，或用 <code>msearch check</code> 查看引擎是否可达</div></div>`;
+    return;
+  }
+  items.forEach((r, i) => {
+    const v = VERDICT[r.verdict] || VERDICT.unknown;
+    const card = document.createElement("div");
+    card.className = "card";
+    const parts = r.parts || {};
+    const bar = ["relevance", "life", "swarm", "freshness"]
+      .map((k) => `<i class="b-${k === "relevance" ? "rel" : k === "life" ? "life" : k === "swarm" ? "swarm" : "fresh"}" style="width:${(parts[k] || 0) * 100}%"></i>`)
+      .join("");
+    card.innerHTML = `
+      <div class="rank">${i + 1}</div>
+      <div class="main">
+        <div class="title"></div>
+        <div class="meta">
+          <span>大小 <b>${r.size}</b></span>
+          <span>可信对等端 <b>${r.peers}</b></span>
+          <span>宣称做种 <b>${r.seeders < 0 ? "未知" : r.seeders}</b></span>
+          <span>相关度 <b>${(r.relevance * 100).toFixed(0)}%</b></span>
+          ${r.publish_date ? `<span>${r.publish_date}</span>` : ""}
+          ${(r.sources || []).map((s) => `<span class="src">${s}</span>`).join("")}
+        </div>
+      </div>
+      <div class="side">
+        <span class="badge ${v.cls}">${v.text}</span>
+        <div class="bar" title="相关度 / 存活证据 / 群体规模 / 新鲜度">${bar}</div>
+        <div class="rowbtns">
+          <button class="mini" data-act="copy">复制磁力</button>
+          <button class="mini" data-act="detail">详情</button>
+        </div>
+      </div>`;
+    card.querySelector(".title").textContent = r.title;
+    card.querySelector('[data-act="copy"]').onclick = (e) => {
+      e.stopPropagation();
+      navigator.clipboard.writeText(r.magnet).then(() => toast("磁力链接已复制")).catch(() => toast("复制失败"));
+    };
+    card.querySelector('[data-act="detail"]').onclick = (e) => { e.stopPropagation(); openDetail(r); };
+    card.onclick = () => openDetail(r);
+    box.appendChild(card);
+  });
+}
+
+function openDetail(r) {
+  $("dTitle").textContent = r.title;
+  $("dMeta").innerHTML = `<span>大小 <b>${r.size}</b></span><span>对等端 <b>${r.peers}</b></span>
+    <span>置信度 <b>${(r.confidence * 100).toFixed(0)}%</b></span><span>总分 <b>${r.score}</b></span>`;
+  $("dMagnet").value = r.magnet || "";
+  $("dCopy").onclick = () => {
+    navigator.clipboard.writeText($("dMagnet").value).then(() => toast("磁力链接已复制")).catch(() => toast("复制失败"));
+  };
+  const parts = r.parts || {};
+  $("dParts").innerHTML = Object.keys(PART_NAME).map((k) => `
+    <div class="row"><span>${PART_NAME[k]}</span>
+      <span class="track"><i style="width:${(parts[k] || 0) * 100}%;background:${PART_COLOR[k]}"></i></span>
+      <span class="val">${(parts[k] || 0).toFixed(3)}</span></div>`).join("");
+
+  const kv = [
+    ["Info Hash", r.info_hash],
+    ["存活判定", (VERDICT[r.verdict] || VERDICT.unknown).text],
+    ["来源引擎", (r.sources || []).join(", ")],
+    ["Tracker", (r.trackers || []).join("\n") || "-"],
+  ];
+  $("dKv").innerHTML = kv.map(([k, v]) => `<dt>${k}</dt><dd>${escapeHtml(String(v))}</dd>`).join("");
+  $("dHint").textContent = r.detail_url ? `详情页：${r.detail_url}` : "";
+  $("drawer").classList.add("open");
+  $("mask").classList.add("open");
+}
+
+function escapeHtml(s) {
+  return s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+
+function closeDetail() {
+  $("drawer").classList.remove("open");
+  $("mask").classList.remove("open");
+}
+
+async function search() {
+  const q = $("q").value.trim();
+  if (!q) return;
+  const btn = $("go");
+  btn.disabled = true;
+  $("status").innerHTML = `<span><span class="spinner"></span> 搜索中…</span>`;
+  $("results").innerHTML = "";
+
+  const params = new URLSearchParams({
+    q,
+    limit: "20",
+    engines: [...activeEngines].join(","),
+    dead_filter: $("deadFilter").value,
+    min_peers: $("minPeers").value || "0",
+    rare_quota: $("rareQuota").value,
+    per_cluster: $("perCluster").value || "0",
+    probe: $("probe").checked ? "1" : "0",
+  });
+
+  try {
+    const resp = await fetch("/api/search?" + params.toString());
+    const data = await resp.json();
+    if (data.error) throw new Error(data.error);
+    renderStatus(data);
+    renderResults(data.results || []);
+  } catch (e) {
+    $("status").innerHTML = `<span class="warn">搜索失败：${escapeHtml(e.message || String(e))}</span>`;
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+$("go").onclick = search;
+$("q").addEventListener("keydown", (e) => { if (e.key === "Enter") search(); });
+$("healthBtn").onclick = checkHealth;
+$("mask").onclick = closeDetail;
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape") closeDetail();
+  if (e.key === "/" && document.activeElement !== $("q")) { e.preventDefault(); $("q").focus(); }
+});
+
+loadEngines();
+</script>
+</body>
+</html>
