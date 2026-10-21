@@ -155,7 +155,7 @@ func TestYtsSearchURL(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got := yts.searchURL(Options{Query: tc.query, Limit: tc.limit})
+			got := yts.searchURL(yts.BaseURL, Options{Query: tc.query, Limit: tc.limit})
 			if got != tc.want {
 				t.Errorf("查询地址 = %q，期望 %q", got, tc.want)
 			}
@@ -216,4 +216,26 @@ func TestYtsLive(t *testing.T) {
 		}
 	}
 	t.Logf("拿到 %d 条结果，例如 %s", len(results), results[0].Title)
+}
+
+// TestYtsBasesIncludeMirrors 校验主域名之后还有可用镜像，
+// 主域名不可达时能自动回退到镜像站点。
+func TestYtsBasesIncludeMirrors(t *testing.T) {
+	yts := NewYts(nil)
+	bases := yts.bases()
+	if len(bases) < 2 {
+		t.Fatalf("期望至少包含一个镜像，实际只有 %v", bases)
+	}
+	if bases[0] != "https://yts.rs" {
+		t.Errorf("首个地址应是主域名，实际 %q", bases[0])
+	}
+	found := false
+	for _, b := range bases {
+		if b == "https://yts.gg" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("镜像列表里应包含 yts.gg，实际 %v", bases)
+	}
 }

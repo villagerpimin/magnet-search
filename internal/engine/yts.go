@@ -33,17 +33,23 @@ func (a *Yts) Name() string { return "yts" }
 // Description 返回引擎描述。
 func (a *Yts) Description() string { return "YTS 电影种子搜索（JSON 接口）" }
 
-// Search 执行搜索。
+// Search 执行搜索，主域名失败时依次回退到镜像站点。
 func (a *Yts) Search(ctx context.Context, opts Options) ([]model.Result, error) {
-	body, err := fetchWithRetry(ctx, a.Client, a.searchURL(opts))
-	if err != nil {
-		return nil, fmt.Errorf("yts 请求失败: %w", err)
+	var lastErr error
+	for _, base := range a.bases() {
+		body, err := fetchWithRetry(ctx, a.Client, a.searchURL(base, opts))
+		if err != nil {
+			lastErr = fmt.Errorf("%s: %w", base, err)
+			continue
+		}
+		results, err := a.parse(body)
+		if err != nil {
+			lastErr = fmt.Errorf("%s: %w", base, err)
+			continue
+		}
+		return limitResults(results, opts.Limit), nil
 	}
-	results, err := a.parse(body)
-	if err != nil {
-		return nil, err
-	}
-	return limitResults(results, opts.Limit), nil
+	return nil, fmt.Errorf("yts 请求失败: %w", lastErr)
 }
 
 // RegisterYts 把 yts 注册到引擎表。
@@ -59,16 +65,35 @@ func RegisterYts(reg *Registry) {
 // ytsDefaultLimit 是接口默认拉取的电影数量。
 const ytsDefaultLimit = 20
 
+// ytsMirrors 是主域名不可用时的备用域名。
+// 官方品牌已迁到 yts.gg，yts.mx 在部分网络下不可达，因此把三者都列为候选。
+var ytsMirrors = []string{"https://yts.gg", "https://yts.am"}
+
+// bases 返回依次尝试的站点地址，主地址在前、镜像在后。
+func (a *Yts) bases() []string {
+	primary := strings.TrimRight(strings.TrimSpace(a.BaseURL), "/")
+	if primary == "" {
+		primary = "https://yts.rs"
+	}
+	out := []string{primary}
+	for _, m := range ytsMirrors {
+		if m != primary {
+			out = append(out, m)
+		}
+	}
+	return out
+}
+
 // searchURL 拼装查询地址。
 // 接口的 limit 数的是电影，而结果条数是种子，
 // 因此这里按电影数请求，最后再按 Options.Limit 截断种子。
-func (a *Yts) searchURL(opts Options) string {
+func (a *Yts) searchURL(base string, opts Options) string {
 	limit := opts.Limit
 	if limit <= 0 {
 		limit = ytsDefaultLimit
 	}
 	return fmt.Sprintf("%s/api/v2/list_movies.json?query_term=%s&limit=%d",
-		strings.TrimRight(a.BaseURL, "/"),
+		strings.TrimRight(base, "/"),
 		url.QueryEscape(opts.Query),
 		limit,
 	)
