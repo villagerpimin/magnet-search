@@ -43,6 +43,8 @@ type Options struct {
 	Probe bool
 	// Proxy 全局代理地址列表
 	Proxy []string
+	// ProxyScope 代理的作用范围：region 只代理境外引擎，all 代理全部引擎
+	ProxyScope string
 	// ProxyEngine 按引擎指定的代理
 	ProxyEngine map[string]string
 	// Timeout 单次 HTTP 请求超时
@@ -83,6 +85,14 @@ const (
 	DefaultRareMaxPeers = 4
 	// DefaultPerCluster 每个聚类默认最多输出条数
 	DefaultPerCluster = 2
+)
+
+// 代理作用范围。
+const (
+	// ProxyScopeRegion 只给境外引擎套代理，境内与通用引擎直连
+	ProxyScopeRegion = "region"
+	// ProxyScopeAll 给所有引擎套代理
+	ProxyScopeAll = "all"
 )
 
 // withDefaults 补齐未设置的参数。
@@ -190,17 +200,7 @@ func Search(ctx context.Context, opts Options) (*Outcome, error) {
 // BuildEngine 按引擎区域解析代理顺序并构造实例。
 // 境外引擎优先走代理，境内或通用引擎优先直连，失败时再回退到另一条路径。
 func BuildEngine(spec engine.Spec, opts Options) (engine.Engine, error) {
-	chain := make([]string, 0, len(opts.Proxy)+2)
-	if override := opts.ProxyEngine[spec.Name]; override != "" {
-		chain = append(chain, override)
-		chain = append(chain, opts.Proxy...)
-	} else if spec.Region == engine.RegionOverseas {
-		chain = append(chain, opts.Proxy...)
-		chain = append(chain, "")
-	} else {
-		chain = append(chain, "")
-		chain = append(chain, opts.Proxy...)
-	}
+	chain := ProxyChain(spec, opts)
 	if len(chain) == 0 {
 		chain = []string{""}
 	}
@@ -215,6 +215,31 @@ func BuildEngine(spec engine.Spec, opts Options) (engine.Engine, error) {
 		return nil, err
 	}
 	return spec.New(client), nil
+}
+
+// ProxyChain 返回指定引擎的代理链，按优先级排列，客户端会依次尝试。
+// 作用范围由 opts.ProxyScope 决定：
+//   - region（默认）：境外引擎优先走代理，境内与通用引擎优先直连；
+//   - all：所有引擎都优先走代理。
+//
+// 按引擎单独指定的代理（opts.ProxyEngine）优先级最高。
+func ProxyChain(spec engine.Spec, opts Options) []string {
+	chain := make([]string, 0, len(opts.Proxy)+2)
+	switch {
+	case opts.ProxyEngine[spec.Name] != "":
+		chain = append(chain, opts.ProxyEngine[spec.Name])
+		chain = append(chain, opts.Proxy...)
+	case opts.ProxyScope == ProxyScopeAll:
+		chain = append(chain, opts.Proxy...)
+		chain = append(chain, "")
+	case spec.Region == engine.RegionOverseas:
+		chain = append(chain, opts.Proxy...)
+		chain = append(chain, "")
+	default:
+		chain = append(chain, "")
+		chain = append(chain, opts.Proxy...)
+	}
+	return chain
 }
 
 // probeLiveness 执行存活探测。
