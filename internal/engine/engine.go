@@ -159,6 +159,16 @@ const defaultEngineTimeout = 25 * time.Second
 
 // Search 并发调用所有引擎，任一引擎失败不影响其他引擎。
 func Search(ctx context.Context, engines []Engine, opts Options) SearchResult {
+	return SearchStream(ctx, engines, opts, nil)
+}
+
+// EngineCallback 在单个引擎返回时被调用。
+// 回调在串行化的上下文中执行，因此可以安全地修改外部状态。
+type EngineCallback func(name string, results []model.Result, err error)
+
+// SearchStream 与 Search 相同，但每个引擎一返回就立刻回调。
+// 上层据此可以边收边出结果，不必空等最慢的那个引擎。
+func SearchStream(ctx context.Context, engines []Engine, opts Options, onEngine EngineCallback) SearchResult {
 	timeout := opts.Timeout
 	if timeout <= 0 {
 		timeout = defaultEngineTimeout
@@ -179,14 +189,18 @@ func Search(ctx context.Context, engines []Engine, opts Options) SearchResult {
 			defer cancel()
 
 			res, err := e.Search(engineCtx, opts)
+
 			mu.Lock()
 			defer mu.Unlock()
 			if err != nil {
 				failures = append(failures, Failure{Engine: e.Name(), Err: err})
-				return
+			} else {
+				results = append(results, res...)
+				perEngine[e.Name()] = len(res)
 			}
-			results = append(results, res...)
-			perEngine[e.Name()] = len(res)
+			if onEngine != nil {
+				onEngine(e.Name(), res, err)
+			}
 		}(e)
 	}
 	wg.Wait()
