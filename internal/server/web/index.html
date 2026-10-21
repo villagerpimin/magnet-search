@@ -86,6 +86,11 @@ header {
   border-radius: 7px; padding: 4px 7px; font: inherit; font-size: 12.5px; outline: none;
 }
 .filters input[type=number] { width: 62px; }
+.filters input[type=text] { background: var(--panel); color: var(--text); border: 1px solid var(--border);
+  border-radius: 7px; padding: 4px 8px; font: inherit; font-size: 12.5px; outline: none; min-width: 200px; }
+.filters input[type=text]:focus { border-color: var(--accent); }
+.filters .mini { font-size: 12px; color: var(--muted); border: 1px solid var(--border); border-radius: 7px; padding: 4px 10px; }
+.filters .mini:hover { color: var(--text); border-color: var(--accent); }
 .chips { display: flex; flex-wrap: wrap; gap: 6px; }
 .chip {
   padding: 3px 10px; border-radius: 999px; border: 1px solid var(--border);
@@ -137,6 +142,16 @@ main { flex: 1; padding: 4px 20px 28px; }
 }
 .mini:hover { color: var(--text); border-color: var(--accent); }
 .rarestar { color: var(--cold); font-size: 12px; }
+
+.pager { display: flex; align-items: center; gap: 6px; justify-content: center; padding: 20px 0 10px; flex-wrap: wrap; }
+.pager button {
+  min-width: 32px; height: 30px; padding: 0 10px; font-size: 13px;
+  border: 1px solid var(--border); border-radius: 7px; background: var(--panel); color: var(--muted);
+}
+.pager button:hover:not(:disabled) { color: var(--text); border-color: var(--accent); }
+.pager button.on { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+.pager button:disabled { opacity: .35; cursor: default; }
+.pager .info { color: var(--muted); font-size: 12.5px; margin-left: 12px; }
 
 .empty { color: var(--muted); text-align: center; padding: 60px 0; }
 .empty .big { font-size: 15px; margin-bottom: 6px; color: var(--text); }
@@ -229,7 +244,25 @@ main { flex: 1; padding: 4px 20px 28px; }
       <input id="perCluster" type="number" min="0" value="2">
     </div>
     <div class="grp">
+      <label>每页</label>
+      <select id="perPage">
+        <option value="10">10 条</option>
+        <option value="20" selected>20 条</option>
+        <option value="50">50 条</option>
+        <option value="100">100 条</option>
+      </select>
+    </div>
+    <div class="grp">
       <label class="toggle"><input id="probe" type="checkbox" checked>网络存活探测</label>
+    </div>
+    <div class="grp">
+      <label>代理</label>
+      <input id="proxy" type="text" placeholder="如 http://127.0.0.1:7890，留空=不用" size="30">
+      <select id="proxyScope">
+        <option value="region">仅境外引擎</option>
+        <option value="all">全部引擎</option>
+      </select>
+      <button class="mini" id="applyProxy" type="button">应用</button>
     </div>
   </div>
 </div>
@@ -239,6 +272,7 @@ main { flex: 1; padding: 4px 20px 28px; }
     <span>输入关键词开始搜索。按 <b>/</b> 聚焦搜索框。</span>
   </div>
   <div class="results" id="results"></div>
+  <div class="pager" id="pager"></div>
 </main>
 
 <div class="mask" id="mask"></div>
@@ -259,6 +293,8 @@ main { flex: 1; padding: 4px 20px 28px; }
 const $ = (id) => document.getElementById(id);
 let engines = [];
 let activeEngines = new Set();
+let currentPage = 1;
+let lastData = null;
 
 const VERDICT = {
   alive:   { cls: "alive",   text: "活跃" },
@@ -331,7 +367,7 @@ async function checkHealth() {
 function renderStatus(data) {
   const s = $("status");
   const bits = [];
-  bits.push(`<span>${data.count} 条结果</span>`);
+  bits.push(`<span>${data.total != null ? data.total : data.count} 条结果</span>`);
   if (data.dropped) bits.push(`<span>过滤 ${data.dropped} 条</span>`);
   bits.push(`<span>${(data.elapsed_ms / 1000).toFixed(1)}s</span>`);
   const engines = Object.entries(data.per_engine || {}).map(([k, v]) => `${k} ${v}`).join(" · ");
@@ -426,17 +462,20 @@ function closeDetail() {
   $("mask").classList.remove("open");
 }
 
-async function search() {
+async function search(page = 1) {
   const q = $("q").value.trim();
   if (!q) return;
   const btn = $("go");
   btn.disabled = true;
+  currentPage = page;
   $("status").innerHTML = `<span><span class="spinner"></span> 搜索中…</span>`;
   $("results").innerHTML = "";
+  $("pager").innerHTML = "";
 
   const params = new URLSearchParams({
     q,
-    limit: "20",
+    per_page: $("perPage").value || "20",
+    page: String(page),
     engines: [...activeEngines].join(","),
     dead_filter: $("deadFilter").value,
     min_peers: $("minPeers").value || "0",
@@ -449,8 +488,10 @@ async function search() {
     const resp = await fetch("/api/search?" + params.toString());
     const data = await resp.json();
     if (data.error) throw new Error(data.error);
+    lastData = data;
     renderStatus(data);
     renderResults(data.results || []);
+    renderPager(data);
   } catch (e) {
     $("status").innerHTML = `<span class="warn">搜索失败：${escapeHtml(e.message || String(e))}</span>`;
   } finally {
@@ -458,7 +499,86 @@ async function search() {
   }
 }
 
-$("go").onclick = search;
+// renderPager 渲染分页控件：首页、上一页、页码窗口、下一页、末页。
+function renderPager(data) {
+  const box = $("pager");
+  const total = data.total || 0;
+  const pages = data.total_pages || 1;
+  const cur = data.page || 1;
+  box.innerHTML = "";
+
+  const mk = (label, target, opts = {}) => {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.textContent = label;
+    if (opts.on) b.className = "on";
+    if (opts.disabled) b.disabled = true;
+    else b.onclick = () => search(target);
+    return b;
+  };
+
+  box.appendChild(mk("« 首页", 1, { disabled: cur <= 1 }));
+  box.appendChild(mk("‹ 上一页", cur - 1, { disabled: cur <= 1 }));
+
+  // 页码窗口：当前页前后各两页，中间用省略号连接
+  const nums = [];
+  for (let p = 1; p <= pages; p++) {
+    if (p === 1 || p === pages || Math.abs(p - cur) <= 2) nums.push(p);
+  }
+  let last = 0;
+  for (const p of nums) {
+    if (last && p - last > 1) {
+      const gap = document.createElement("button");
+      gap.type = "button";
+      gap.textContent = "…";
+      gap.disabled = true;
+      box.appendChild(gap);
+    }
+    box.appendChild(mk(String(p), p, { on: p === cur }));
+    last = p;
+  }
+
+  box.appendChild(mk("下一页 ›", cur + 1, { disabled: cur >= pages }));
+  box.appendChild(mk("末页 »", pages, { disabled: cur >= pages }));
+
+  const info = document.createElement("span");
+  info.className = "info";
+  info.textContent = `共 ${total} 条 · 第 ${cur}/${pages} 页`;
+  box.appendChild(info);
+}
+
+$("go").onclick = () => search(1);
+$("perPage").onchange = () => search(1);
+
+// loadSettings 读取服务端保存的代理设置并回填到界面。
+async function loadSettings() {
+  try {
+    const s = await (await fetch("/api/settings")).json();
+    $("proxy").value = s.proxy || "";
+    $("proxyScope").value = s.proxy_scope === "all" ? "all" : "region";
+  } catch (e) {
+    /* 读不到就保持默认 */
+  }
+}
+
+// applySettings 保存代理设置。
+async function applySettings() {
+  const body = {
+    proxy: $("proxy").value.trim(),
+    proxy_scope: $("proxyScope").value,
+  };
+  try {
+    await fetch("/api/settings", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    toast(body.proxy ? "已应用代理：" + body.proxy : "已关闭代理");
+  } catch (e) {
+    toast("设置保存失败");
+  }
+}
+$("applyProxy").onclick = applySettings;
 $("q").addEventListener("keydown", (e) => { if (e.key === "Enter") search(); });
 $("healthBtn").onclick = checkHealth;
 $("mask").onclick = closeDetail;
@@ -468,6 +588,7 @@ document.addEventListener("keydown", (e) => {
 });
 
 loadEngines();
+loadSettings();
 </script>
 </body>
 </html>
