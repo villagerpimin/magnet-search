@@ -71,7 +71,8 @@ func parseArgs(args []string) (*cliOptions, error) {
 
 		switch name {
 		case "engine":
-			opts.app.Engines = splitList(value)
+			// 允许重复指定，累加而不是覆盖
+			opts.app.Engines = append(opts.app.Engines, splitList(value)...)
 		case "limit":
 			n, err := parseInt(value)
 			if err != nil {
@@ -123,7 +124,8 @@ func parseArgs(args []string) (*cliOptions, error) {
 		case "no-probe":
 			opts.app.Probe = false
 		case "proxy":
-			opts.app.Proxy = splitList(value)
+			// 允许重复指定，累加而不是覆盖
+			opts.app.Proxy = append(opts.app.Proxy, splitList(value)...)
 		case "proxy-engine":
 			k, v, ok := strings.Cut(value, "=")
 			if !ok {
@@ -167,6 +169,8 @@ func parseArgs(args []string) (*cliOptions, error) {
 	}
 
 	opts.query = strings.Join(positional, " ")
+	// 关键词必须同时落到流水线的参数上，否则引擎会按空查询去搜
+	opts.app.Query = opts.query
 	return opts, nil
 }
 
