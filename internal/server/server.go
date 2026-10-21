@@ -5,17 +5,19 @@ import (
 	"context"
 	"embed"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io/fs"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 
-	"github.com/pigzhu/magnet-search/internal/aggregate"
 	"github.com/pigzhu/magnet-search/internal/app"
 	"github.com/pigzhu/magnet-search/internal/engine"
+	"github.com/pigzhu/magnet-search/internal/model"
 )
 
 //go:embed web
@@ -61,7 +63,11 @@ func New(defaults app.Options) *Server {
 		defaults:    defaults,
 		engineSpecs: reg.Specs(),
 		cache:       newSearchCache(),
-		settings:    Settings{ProxyScope: app.ProxyScopeRegion},
+		settings: Settings{
+			// 命令行传入的代理作为初始设置，界面打开时直接可见
+			Proxy:      strings.Join(defaults.Proxy, ","),
+			ProxyScope: app.ProxyScopeRegion,
+		},
 	}
 }
 
@@ -78,7 +84,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/engines", s.handleEngines)
 	mux.HandleFunc("/api/settings", s.handleSettings)
 	mux.HandleFunc("/api/search", s.handleSearch)
+	mux.HandleFunc("/api/search/stream", s.handleSearchStream)
 	mux.HandleFunc("/api/check", s.handleCheck)
+	mux.HandleFunc("/api/check/stream", s.handleCheckStream)
 
 	return mux
 }
@@ -171,45 +179,72 @@ type engineHealth struct {
 	Error string `json:"error,omitempty"`
 }
 
-// handleCheck 逐个测试引擎在当前网络下是否可用。
+// handleCheck 并发测试各引擎在当前网络下的可用性。
+// 各引擎同时开始，谁先返回先记谁，总耗时取决于最慢的那个而不是累加。
 func (s *Server) handleCheck(w http.ResponseWriter, r *http.Request) {
 	opts := s.defaults
 	if v := r.URL.Query().Get("proxy"); v != "" {
 		opts.Proxy = splitList(v)
 	}
-
-	type result struct {
-		health engineHealth
+	s.settingsMu.RLock()
+	saved := s.settings
+	s.settingsMu.RUnlock()
+	if len(opts.Proxy) == 0 && saved.Proxy != "" {
+		opts.Proxy = splitList(saved.Proxy)
 	}
-	results := make([]engineHealth, 0, len(s.engineSpecs))
 
-	for _, spec := range s.engineSpecs {
-		h := engineHealth{engineInfo: engineInfo{
-			Name:        spec.Name,
-			Region:      string(spec.Region),
-			Description: spec.Description,
-		}}
-		e, err := buildProbeEngine(spec, opts)
+	reg := engine.NewRegistry()
+	engine.RegisterAll(reg)
+	specs, err := reg.Select(opts.Engines)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 3*time.Minute)
+	defer cancel()
+
+	engines := make([]engine.Engine, 0, len(specs))
+	meta := make(map[string]engine.Spec, len(specs))
+	for _, spec := range specs {
+		e, err := app.BuildEngine(spec, opts)
 		if err != nil {
-			h.Error = err.Error()
-			results = append(results, h)
 			continue
 		}
-		start := time.Now()
-		ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
-		res, err := e.Search(ctx, engine.Options{Query: "ubuntu", Limit: 5})
-		cancel()
-		h.ElapsedMS = time.Since(start).Milliseconds()
-		if err != nil {
-			h.Error = err.Error()
-		} else {
-			h.OK = true
-			h.Count = len(res)
-		}
-		results = append(results, h)
+		engines = append(engines, e)
+		meta[spec.Name] = spec
 	}
 
-	writeJSON(w, http.StatusOK, map[string]any{"engines": results})
+	var (
+		mu       sync.Mutex
+		statuses = make([]engineStatus, 0, len(specs))
+	)
+	engine.SearchStream(ctx, engines, engine.Options{Query: "ubuntu", Limit: 5}, func(name string, results []model.Result, searchErr error) {
+		spec := meta[name]
+		status := engineStatus{
+			Name:        name,
+			Region:      string(spec.Region),
+			Description: spec.Description,
+			Count:       len(results),
+		}
+		if searchErr != nil {
+			status.Error = searchErr.Error()
+		} else {
+			status.OK = true
+		}
+		mu.Lock()
+		statuses = append(statuses, status)
+		mu.Unlock()
+	})
+
+	sort.Slice(statuses, func(i, j int) bool { return statuses[i].Name < statuses[j].Name })
+	okCount := 0
+	for _, st := range statuses {
+		if st.OK {
+			okCount++
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"engines": statuses, "ok": okCount, "total": len(specs)})
 }
 
 // searchResult 是一条搜索结果。
@@ -284,14 +319,13 @@ type searchResponse struct {
 	PoolSize int `json:"pool_size"`
 }
 
-// handleSearch 执行搜索并返回 JSON。
-func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
+// searchOptions 解析检索请求的参数，返回流水线参数与分页信息。
+func (s *Server) searchOptions(r *http.Request) (app.Options, int, int, error) {
 	q := r.URL.Query()
 	opts := s.defaults
 	opts.Query = strings.TrimSpace(q.Get("q"))
 	if opts.Query == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "缺少搜索关键词"})
-		return
+		return opts, 0, 0, errors.New("缺少搜索关键词")
 	}
 	if v := q.Get("limit"); v != "" {
 		if n, err := strconv.Atoi(v); err == nil {
@@ -368,12 +402,19 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 结果池取每页条数的若干倍，够翻几页；翻到池子尽头再自动扩大重取。
-	poolSize := perPage * poolPagesFactor
-	if poolSize > maxPoolSize {
-		poolSize = maxPoolSize
-	}
+	poolSize := poolSizeFor(perPage)
 	opts.Limit = poolSize
 	opts.PerEngineLimit = poolSize
+	return opts, perPage, page, nil
+}
+
+// handleSearch 执行一次完整的检索并返回最终结果。
+func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
+	opts, perPage, page, err := s.searchOptions(r)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
 
 	ctx, cancel := context.WithTimeout(r.Context(), 180*time.Second)
 	defer cancel()
@@ -407,7 +448,7 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 		Page:           page,
 		PerPage:        perPage,
 		TotalPages:     totalPages,
-		PoolSize:       poolSize,
+		PoolSize:       poolSizeFor(perPage),
 	}
 	for _, f := range out.Failures {
 		resp.Failures = append(resp.Failures, map[string]string{"engine": f.Engine, "error": f.Err.Error()})
@@ -415,35 +456,19 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 
 	now := time.Now()
 	for _, c := range pageItems {
-		relevance, lifeAxis, swarm, freshness := aggregate.ScoreParts(c, now)
-		resp.Results = append(resp.Results, searchResult{
-			Title:       c.Result.Title,
-			InfoHash:    c.Result.InfoHash,
-			Magnet:      c.Result.MagnetURI,
-			Size:        humanSize(c.Result.SizeBytes),
-			SizeBytes:   c.Result.SizeBytes,
-			Seeders:     c.Result.Seeders,
-			Leechers:    c.Result.Leechers,
-			PublishDate: formatDate(c.Result.PublishDate),
-			Sources:     c.Sources,
-			Verdict:     string(c.Verdict),
-			Confidence:  round3(c.Confidence),
-			Relevance:   round3(c.Relevance),
-			Score:       round3(c.Score),
-			Peers:       aggregate.CrediblePeers(&c),
-			Trackers:    magnetTrackers(c.Result.MagnetURI),
-			DetailURL:   c.Result.URL,
-			Parts: map[string]float64{
-				"relevance": round3(relevance),
-				"life":      round3(lifeAxis),
-				"swarm":     round3(swarm),
-				"freshness": round3(freshness),
-			},
-			Rare: c.Verdict == aggregate.VerdictCold,
-		})
+		resp.Results = append(resp.Results, newSearchResult(c, now))
 	}
 
 	writeJSON(w, http.StatusOK, resp)
+}
+
+// poolSizeFor 返回结果池大小：每页条数的若干倍，够翻几页。
+func poolSizeFor(perPage int) int {
+	poolSize := perPage * poolPagesFactor
+	if poolSize > maxPoolSize {
+		poolSize = maxPoolSize
+	}
+	return poolSize
 }
 
 // paginate 计算分页切片区间，并把越界的页码收敛到最后一页。
@@ -477,6 +502,7 @@ func paginate(total, perPage, page int) (start, end, curPage, totalPages int) {
 func searchCacheKey(opts app.Options) string {
 	return strings.Join([]string{
 		opts.Query,
+		strconv.Itoa(opts.Limit),
 		strings.Join(opts.Engines, ","),
 		opts.DeadFilter,
 		opts.Category,

@@ -167,3 +167,61 @@ func TestSettingsAPI(t *testing.T) {
 		t.Errorf("保存后读回 = %+v，期望代理与 all 范围", after)
 	}
 }
+
+func TestSSEWriterFormat(t *testing.T) {
+	rec := httptest.NewRecorder()
+	sse, err := newSSEWriter(rec)
+	if err != nil {
+		t.Fatalf("创建 SSE 写入器失败: %v", err)
+	}
+	sse.send("result", map[string]any{"title": "x"})
+	got := rec.Body.String()
+	if !strings.HasPrefix(got, "event: result\ndata: ") {
+		t.Errorf("SSE 事件格式不对: %q", got)
+	}
+	if !strings.HasSuffix(got, "\n\n") {
+		t.Errorf("SSE 事件应以空行结尾: %q", got)
+	}
+	if ct := rec.Header().Get("Content-Type"); !strings.HasPrefix(ct, "text/event-stream") {
+		t.Errorf("Content-Type = %q，应为 text/event-stream", ct)
+	}
+}
+
+func TestSettingsPreferCommandLineProxy(t *testing.T) {
+	// 命令行传入的代理应当作为界面的初始设置，界面打开即可见
+	srv := New(app.Options{Proxy: []string{"http://127.0.0.1:7890"}})
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+
+	resp, err := http.Get(ts.URL + "/api/settings")
+	if err != nil {
+		t.Fatalf("读取设置失败: %v", err)
+	}
+	defer resp.Body.Close()
+	var got Settings
+	if err := json.NewDecoder(resp.Body).Decode(&got); err != nil {
+		t.Fatalf("解析设置失败: %v", err)
+	}
+	if got.Proxy != "http://127.0.0.1:7890" {
+		t.Errorf("初始代理 = %q，期望 %q", got.Proxy, "http://127.0.0.1:7890")
+	}
+	if got.ProxyScope != app.ProxyScopeRegion {
+		t.Errorf("初始作用范围 = %q，期望 %q", got.ProxyScope, app.ProxyScopeRegion)
+	}
+}
+
+func TestSearchOptionsUseSavedProxy(t *testing.T) {
+	srv := New(app.Options{})
+	srv.settings.Proxy = "http://127.0.0.1:7890"
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+
+	req := httptest.NewRequest(http.MethodGet, "/api/search?q=ubuntu", nil)
+	opts, _, _, err := srv.searchOptions(req)
+	if err != nil {
+		t.Fatalf("解析参数失败: %v", err)
+	}
+	if len(opts.Proxy) != 1 || opts.Proxy[0] != "http://127.0.0.1:7890" {
+		t.Errorf("检索参数里的代理 = %v，期望使用界面保存的代理", opts.Proxy)
+	}
+}
