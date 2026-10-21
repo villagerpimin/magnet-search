@@ -124,8 +124,10 @@ func (a *Apibay) parse(body []byte) ([]model.Result, error) {
 	results := make([]model.Result, 0, len(items))
 	for _, it := range items {
 		hash, ok := magnet.NormalizeInfoHash(it.InfoHash)
-		if !ok {
-			// info hash 非法或缺失的记录直接丢弃，绝不输出零值哈希
+		if !ok || magnet.IsNullInfoHash(hash) {
+			// info hash 非法、缺失或是零值哈希的记录直接丢弃。
+			// 零值哈希是接口在“没有匹配结果”时返回的占位符（标题写作
+			// “No results returned”），当成真实资源会污染搜索结果。
 			continue
 		}
 		// 接口对标题做了 HTML 转义，需要还原成原始文本

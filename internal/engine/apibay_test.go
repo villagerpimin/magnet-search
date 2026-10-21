@@ -166,3 +166,22 @@ func TestApibaySkipsInvalidHash(t *testing.T) {
 		t.Errorf("info hash = %q", results[0].InfoHash)
 	}
 }
+
+// TestApibaySkipsNullHashPlaceholder 校验接口在“没有结果”时返回的零值占位记录会被丢弃。
+// 该记录的标题是 “No results returned”、info hash 全零，若不过滤会被当成真实资源输出。
+func TestApibaySkipsNullHashPlaceholder(t *testing.T) {
+	body := []byte(`[
+		{"id":"0","name":"No results returned","info_hash":"0000000000000000000000000000000000000000","leechers":"0","seeders":"0","size":"0","added":"0","category":"0"},
+		{"id":"1","name":"真的资源","info_hash":"2C6B6858D61DA9543D4231A71DB4B1C9264B0685","seeders":"3","leechers":"1","size":"1024","added":"1652877231"}
+	]`)
+	results, err := NewApibay(nil).parse(body)
+	if err != nil {
+		t.Fatalf("解析失败: %v", err)
+	}
+	if len(results) != 1 {
+		t.Fatalf("期望只保留 1 条结果，实际 %d 条", len(results))
+	}
+	if results[0].Title != "真的资源" {
+		t.Errorf("保留下来的是 %q，应该是真实资源", results[0].Title)
+	}
+}

@@ -50,6 +50,16 @@ func NormalizeInfoHash(s string) (string, bool) {
 	}
 }
 
+// IsNullInfoHash 判断哈希是否为零值哈希。
+// 零值哈希是各索引站在“没有结果”时使用的占位符，不是真实资源，必须过滤。
+func IsNullInfoHash(hash string) bool {
+	h, ok := NormalizeInfoHash(hash)
+	if !ok {
+		return false
+	}
+	return strings.Trim(h, "0") == ""
+}
+
 // Trackers 提取磁力链接中的 tr 参数（去重、保持顺序）。
 func Trackers(uri string) []string {
 	u, err := url.Parse(uri)

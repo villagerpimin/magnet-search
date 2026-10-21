@@ -52,8 +52,9 @@ func Merge(results []model.Result) []Candidate {
 
 	for _, r := range results {
 		hash, ok := magnet.NormalizeInfoHash(r.InfoHash)
-		if !ok {
-			// 解析不出哈希的结果无法去重，直接丢弃，避免污染输出
+		if !ok || magnet.IsNullInfoHash(hash) {
+			// 解析不出哈希、或哈希是零值占位符的结果无法去重，直接丢弃，
+			// 避免把索引站“没有结果”的占位记录当成真实资源输出
 			continue
 		}
 		r.InfoHash = hash

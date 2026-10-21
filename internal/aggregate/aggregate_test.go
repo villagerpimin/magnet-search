@@ -131,3 +131,34 @@ func TestRelevance(t *testing.T) {
 func magnetTrackers(uri string) []string {
 	return magnet.Trackers(uri)
 }
+
+// TestMergeDropsNullHashPlaceholder 校验零值占位哈希不会被当成真实资源。
+func TestMergeDropsNullHashPlaceholder(t *testing.T) {
+	results := []model.Result{
+		{
+			Title:     "No results returned",
+			InfoHash:  "0000000000000000000000000000000000000000",
+			Seeders:   0,
+			Leechers:  0,
+			SizeBytes: 0,
+			Source:    "apibay",
+			ListedAt:  time.Now(),
+		},
+		{
+			Title:     "真实资源",
+			InfoHash:  "2c6b6858d61da9543d4231a71db4b1c9264b0685",
+			Seeders:   3,
+			Leechers:  1,
+			SizeBytes: 1024,
+			Source:    "apibay",
+			ListedAt:  time.Now(),
+		},
+	}
+	got := Merge(results)
+	if len(got) != 1 {
+		t.Fatalf("期望只保留 1 条候选，实际 %d 条", len(got))
+	}
+	if got[0].Result.Title != "真实资源" {
+		t.Errorf("保留下来的是 %q，应该是真实资源", got[0].Result.Title)
+	}
+}
