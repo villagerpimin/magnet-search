@@ -10,6 +10,7 @@ import (
 	"github.com/pigzhu/magnet-search/internal/engine"
 	"github.com/pigzhu/magnet-search/internal/httpx"
 	"github.com/pigzhu/magnet-search/internal/liveness"
+	"github.com/pigzhu/magnet-search/internal/magnet"
 	"github.com/pigzhu/magnet-search/internal/model"
 )
 
@@ -195,6 +196,162 @@ func Search(ctx context.Context, opts Options) (*Outcome, error) {
 	out.Dropped = len(ranked.Dropped)
 	out.Elapsed = time.Since(start)
 	return out, nil
+}
+
+// 事件类型。
+const (
+	// EventEngine 某个引擎返回了结果或失败
+	EventEngine = "engine"
+	// EventResult 一条已算好分数的候选结果
+	EventResult = "result"
+	// EventDone 全部引擎结束并完成存活探测后的最终结果
+	EventDone = "done"
+)
+
+// Event 是流式检索过程中的一个事件。
+type Event struct {
+	// Kind 事件类型
+	Kind string
+	// Engine 引擎名
+	Engine string
+	// Count 该引擎返回的条数
+	Count int
+	// Err 引擎失败原因
+	Err string
+	// Result 单条候选结果
+	Result *aggregate.Candidate
+	// Outcome 全部完成后的汇总
+	Outcome *Outcome
+}
+
+// SearchStream 执行检索，并在过程中逐条回调。
+// 引擎一返回就把它的结果合并、打分并回调，界面可以边搜边出；
+// 全部引擎结束后再做存活探测与最终排序，通过 EventDone 给出准确结果。
+func SearchStream(ctx context.Context, opts Options, emit func(Event)) (*Outcome, error) {
+	opts.withDefaults()
+	start := time.Now()
+
+	reg := engine.NewRegistry()
+	engine.RegisterAll(reg)
+	specs, err := reg.Select(opts.Engines)
+	if err != nil {
+		return nil, err
+	}
+
+	engines := make([]engine.Engine, 0, len(specs))
+	for _, spec := range specs {
+		e, err := BuildEngine(spec, opts)
+		if err != nil {
+			continue
+		}
+		engines = append(engines, e)
+	}
+	if len(engines) == 0 {
+		return nil, fmt.Errorf("没有可用引擎")
+	}
+
+	acc := &merger{seen: make(map[string]bool)}
+	res := engine.SearchStream(ctx, engines, engine.Options{
+		Query:    opts.Query,
+		Limit:    opts.PerEngineLimit,
+		Category: opts.Category,
+		Timeout:  opts.EngineTimeout,
+	}, func(name string, results []model.Result, searchErr error) {
+		if searchErr != nil {
+			emit(Event{Kind: EventEngine, Engine: name, Err: searchErr.Error()})
+			return
+		}
+		emit(Event{Kind: EventEngine, Engine: name, Count: len(results)})
+		for _, c := range acc.add(opts.Query, results) {
+			candidate := c
+			emit(Event{Kind: EventResult, Result: &candidate})
+		}
+	})
+
+	cands := acc.candidates()
+	out := &Outcome{
+		Query:     opts.Query,
+		PerEngine: res.PerEngine,
+		Failures:  res.Failures,
+	}
+
+	if opts.Probe {
+		live, reason, available := probeLiveness(ctx, opts, cands)
+		out.ProbeAvailable = available
+		out.ProbeReason = reason
+		for i := range cands {
+			if l, ok := live[cands[i].Result.InfoHash]; ok {
+				cands[i].Live = l
+			}
+		}
+	}
+
+	ranked := aggregate.Rank(cands, aggregate.RankOptions{
+		Query:         opts.Query,
+		Limit:         opts.Limit,
+		PerCluster:    opts.PerCluster,
+		RareQuota:     opts.RareQuota,
+		RareMaxPeers:  opts.RareMaxPeers,
+		MinPeers:      opts.MinPeers,
+		MinConfidence: opts.MinConfidence,
+		DeadFilter:    opts.DeadFilter,
+		ClusterKey:    opts.ClusterKey,
+	})
+
+	out.Results = ranked.Kept
+	out.Dropped = len(ranked.Dropped)
+	out.Elapsed = time.Since(start)
+	return out, nil
+}
+
+// merger 跨引擎累积结果：按 info hash 去重，并为新到的结果算好分数。
+type merger struct {
+	// seen 已经产出过的 info hash
+	seen map[string]bool
+	// all 累积到的全部候选
+	all []aggregate.Candidate
+}
+
+// add 合并一批结果，返回其中首次出现、需要立即产出的候选。
+func (m *merger) add(query string, results []model.Result) []aggregate.Candidate {
+	now := time.Now()
+	var fresh []aggregate.Candidate
+	for _, r := range results {
+		hash, ok := magnet.NormalizeInfoHash(r.InfoHash)
+		if !ok || magnet.IsNullInfoHash(hash) {
+			continue
+		}
+		if m.seen[hash] {
+			continue
+		}
+		m.seen[hash] = true
+		r.InfoHash = hash
+		if r.ListedAt.IsZero() {
+			r.ListedAt = now
+		}
+		c := aggregate.Candidate{Result: r, Live: model.NewLiveness(hash), Sources: []string{r.Source}}
+		rel := aggregate.ComputeRelevance(aggregate.RelevanceInput{
+			Query: query,
+			Title: r.Title,
+			Rank:  r.Rank,
+		})
+		if !rel.Passed {
+			// 相关度不达标的直接丢弃，不产出
+			m.seen[hash] = false
+			continue
+		}
+		c.Relevance = rel.Score
+		c.Verdict, c.Confidence = aggregate.Judge(&c)
+		c.Score = aggregate.Score(c, now)
+		m.all = append(m.all, c)
+		fresh = append(fresh, c)
+	}
+	return fresh
+}
+
+// candidates 返回累积到的全部候选。
+func (m *merger) candidates() []aggregate.Candidate {
+	return m.all
 }
 
 // BuildEngine 按引擎区域解析代理顺序并构造实例。

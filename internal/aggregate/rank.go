@@ -223,6 +223,11 @@ func score(c Candidate, now time.Time) float64 {
 		weightFreshness*freshness
 }
 
+// Score 计算候选的排序分，供流式产出时逐条打分。
+func Score(c Candidate, now time.Time) float64 {
+	return score(c, now)
+}
+
 // ScoreParts 返回排序分的各分项，供界面把分数拆开显示。
 func ScoreParts(c Candidate, now time.Time) (relevance, lifeAxis, swarmSize, freshness float64) {
 	peers := float64(CrediblePeers(&c))
