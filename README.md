@@ -64,6 +64,40 @@ go build -o msearch ./cmd/msearch
 > 服务默认只监听回环地址。用 `--addr 0.0.0.0:8080` 对外开放时，服务本身没有鉴权，
 > 请自行放在反向代理与访问控制之后。
 
+## 跨平台编译
+
+Go 交叉编译出的二进制可以直接在对应系统运行，**Windows 上不需要装 Go，也不需要任何运行时或 VC++ 运行库**
+（构建时用 `CGO_ENABLED=0` 静态链接，本项目只依赖纯 Go 的 `golang.org/x/net`）。
+
+```bash
+# 一键构建全部平台到 dist/
+scripts/build.sh
+
+# 只构建 Windows
+scripts/build.sh windows
+
+# 或者手工交叉编译
+CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -o msearch.exe ./cmd/msearch
+CGO_ENABLED=0 GOOS=windows GOARCH=arm64 go build -o msearch-arm64.exe ./cmd/msearch
+```
+
+产物（`-trimpath -ldflags "-s -w"` 后约 7 MB）：
+
+| 平台 | 文件名 |
+|---|---|
+| Windows x64 | `msearch-windows-am64.exe` |
+| Windows ARM64 | `msearch-windows-arm64.exe` |
+| Linux x64 / ARM64 | `msearch-linux-amd64` / `msearch-linux-arm64` |
+| macOS Intel / Apple Silicon | `msearch-darwin-amd64` / `msearch-darwin-arm64` |
+
+打 `v*` tag 会由 `.github/workflows/release.yml` 自动构建并附到 Release 上。
+
+Windows 上使用时的两点注意：
+
+- **中文输出乱码**：旧版 cmd.exe 默认代码页是 GBK，程序输出的是 UTF-8。执行 `chcp 65001` 或改用
+  Windows Terminal 即可。Windows 11 的终端默认已经是 UTF-8。
+- **杀毒软件误报**：未签名的 Go 可执行文件偶尔被启发式引擎拦下，加签名或自行放行即可。
+
 ## 常用选项
 
 ```
