@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/pigzhu/magnet-search/internal/aggregate"
@@ -20,19 +21,48 @@ import (
 //go:embed web
 var webFS embed.FS
 
+// 分页与结果池的参数。
+const (
+	// maxPerPage 单页最多显示多少条
+	maxPerPage = 100
+	// poolPagesFactor 结果池是每页条数的多少倍
+	poolPagesFactor = 5
+	// maxPoolSize 结果池上限
+	maxPoolSize = 200
+)
+
 // Server 是 Web 服务。
 type Server struct {
 	// defaults 是请求未显式指定时使用的默认参数
 	defaults app.Options
 	// engineSpecs 供界面展示的引擎清单
 	engineSpecs []engine.Spec
+	// cache 缓存整份排序结果，翻页时直接切片
+	cache *searchCache
+	// settings 界面上可调整的检索设置
+	settings Settings
+	// settingsMu 保护 settings
+	settingsMu sync.RWMutex
+}
+
+// Settings 是界面上可调整的检索设置。
+type Settings struct {
+	// Proxy 代理地址，空表示不使用代理
+	Proxy string `json:"proxy"`
+	// ProxyScope 代理作用范围：region 只代理境外引擎，all 代理全部引擎
+	ProxyScope string `json:"proxy_scope"`
 }
 
 // New 创建 Web 服务。
 func New(defaults app.Options) *Server {
 	reg := engine.NewRegistry()
 	engine.RegisterAll(reg)
-	return &Server{defaults: defaults, engineSpecs: reg.Specs()}
+	return &Server{
+		defaults:    defaults,
+		engineSpecs: reg.Specs(),
+		cache:       newSearchCache(),
+		settings:    Settings{ProxyScope: app.ProxyScopeRegion},
+	}
 }
 
 // Handler 返回 HTTP 处理器。
@@ -46,6 +76,7 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("/", http.FileServer(http.FS(assets)))
 
 	mux.HandleFunc("/api/engines", s.handleEngines)
+	mux.HandleFunc("/api/settings", s.handleSettings)
 	mux.HandleFunc("/api/search", s.handleSearch)
 	mux.HandleFunc("/api/check", s.handleCheck)
 
@@ -96,6 +127,35 @@ func (s *Server) handleEngines(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 	writeJSON(w, http.StatusOK, list)
+}
+
+// handleSettings 读取或更新界面上的检索设置。
+func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		s.settingsMu.RLock()
+		cur := s.settings
+		s.settingsMu.RUnlock()
+		writeJSON(w, http.StatusOK, cur)
+	case http.MethodPost:
+		var incoming Settings
+		if err := json.NewDecoder(r.Body).Decode(&incoming); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "设置格式不正确: " + err.Error()})
+			return
+		}
+		if incoming.ProxyScope != app.ProxyScopeAll {
+			incoming.ProxyScope = app.ProxyScopeRegion
+		}
+		incoming.Proxy = strings.TrimSpace(incoming.Proxy)
+		s.settingsMu.Lock()
+		s.settings = incoming
+		s.settingsMu.Unlock()
+		// 设置变了，之前的检索缓存不再适用
+		s.cache.clear()
+		writeJSON(w, http.StatusOK, incoming)
+	default:
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "只支持 GET 与 POST"})
+	}
 }
 
 // engineHealth 是单个引擎的自检结果。
@@ -210,8 +270,18 @@ type searchResponse struct {
 	PerEngine map[string]int `json:"per_engine"`
 	// Failures 引擎失败信息
 	Failures []map[string]string `json:"failures,omitempty"`
-	// Results 结果列表
+	// Results 当前页的结果列表
 	Results []searchResult `json:"results"`
+	// Total 本次检索命中的结果总数
+	Total int `json:"total"`
+	// Page 当前页码，从 1 开始
+	Page int `json:"page"`
+	// PerPage 每页条数
+	PerPage int `json:"per_page"`
+	// TotalPages 总页数
+	TotalPages int `json:"total_pages"`
+	// PoolSize 本次检索实际取回的结果池大小
+	PoolSize int `json:"pool_size"`
 }
 
 // handleSearch 执行搜索并返回 JSON。
@@ -260,38 +330,91 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 	if v := q.Get("category"); v != "" {
 		opts.Category = v
 	}
+	// 请求里没显式给代理时，用界面上保存的设置
+	s.settingsMu.RLock()
+	saved := s.settings
+	s.settingsMu.RUnlock()
 	if v := q.Get("proxy"); v != "" {
 		opts.Proxy = splitList(v)
+	} else if saved.Proxy != "" {
+		opts.Proxy = splitList(saved.Proxy)
+	}
+	if v := q.Get("proxy_scope"); v != "" {
+		opts.ProxyScope = v
+	} else if saved.ProxyScope != "" {
+		opts.ProxyScope = saved.ProxyScope
 	}
 	if v := q.Get("probe"); v != "" {
 		opts.Probe = v == "1" || v == "true"
 	}
 
-	ctx, cancel := context.WithTimeout(r.Context(), 120*time.Second)
+	perPage := 20
+	if v := q.Get("per_page"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			perPage = n
+		}
+	}
+	if perPage < 1 {
+		perPage = 1
+	}
+	if perPage > maxPerPage {
+		perPage = maxPerPage
+	}
+	page := 1
+	if v := q.Get("page"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			page = n
+		}
+	}
+
+	// 结果池取每页条数的若干倍，够翻几页；翻到池子尽头再自动扩大重取。
+	poolSize := perPage * poolPagesFactor
+	if poolSize > maxPoolSize {
+		poolSize = maxPoolSize
+	}
+	opts.Limit = poolSize
+	opts.PerEngineLimit = poolSize
+
+	ctx, cancel := context.WithTimeout(r.Context(), 180*time.Second)
 	defer cancel()
 
-	out, err := app.Search(ctx, opts)
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
-		return
+	key := searchCacheKey(opts)
+	out, cached := s.cache.get(key)
+	if !cached {
+		result, searchErr := app.Search(ctx, opts)
+		if searchErr != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": searchErr.Error()})
+			return
+		}
+		out = result
+		s.cache.put(key, out)
 	}
+
+	total := len(out.Results)
+	start, end, page, totalPages := paginate(total, perPage, page)
+	pageItems := out.Results[start:end]
 
 	resp := searchResponse{
 		Query:          out.Query,
-		Count:          len(out.Results),
+		Count:          len(pageItems),
 		Dropped:        out.Dropped,
 		ElapsedMS:      out.Elapsed.Milliseconds(),
 		ProbeAvailable: out.ProbeAvailable,
 		ProbeReason:    out.ProbeReason,
 		PerEngine:      out.PerEngine,
-		Results:        make([]searchResult, 0, len(out.Results)),
+		Results:        make([]searchResult, 0, len(pageItems)),
+		Total:          total,
+		Page:           page,
+		PerPage:        perPage,
+		TotalPages:     totalPages,
+		PoolSize:       poolSize,
 	}
 	for _, f := range out.Failures {
 		resp.Failures = append(resp.Failures, map[string]string{"engine": f.Engine, "error": f.Err.Error()})
 	}
 
 	now := time.Now()
-	for _, c := range out.Results {
+	for _, c := range pageItems {
 		relevance, lifeAxis, swarm, freshness := aggregate.ScoreParts(c, now)
 		resp.Results = append(resp.Results, searchResult{
 			Title:       c.Result.Title,
@@ -321,6 +444,50 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, resp)
+}
+
+// paginate 计算分页切片区间，并把越界的页码收敛到最后一页。
+func paginate(total, perPage, page int) (start, end, curPage, totalPages int) {
+	if perPage < 1 {
+		perPage = 1
+	}
+	totalPages = (total + perPage - 1) / perPage
+	if totalPages < 1 {
+		totalPages = 1
+	}
+	if page < 1 {
+		page = 1
+	}
+	if page > totalPages {
+		page = totalPages
+	}
+	start = (page - 1) * perPage
+	if start > total {
+		start = total
+	}
+	end = start + perPage
+	if end > total {
+		end = total
+	}
+	return start, end, page, totalPages
+}
+
+// searchCacheKey 依据影响结果的参数生成缓存键。
+// 翻页与切换每页条数不改变键，因此翻页会命中同一份缓存。
+func searchCacheKey(opts app.Options) string {
+	return strings.Join([]string{
+		opts.Query,
+		strings.Join(opts.Engines, ","),
+		opts.DeadFilter,
+		opts.Category,
+		opts.ClusterKey,
+		strconv.Itoa(opts.MinPeers),
+		strconv.FormatFloat(opts.MinConfidence, 'f', 3, 64),
+		strconv.Itoa(opts.RareQuota),
+		strconv.Itoa(opts.RareMaxPeers),
+		strconv.Itoa(opts.PerCluster),
+		strconv.FormatBool(opts.Probe),
+	}, "|")
 }
 
 // writeJSON 写出 JSON 响应。
