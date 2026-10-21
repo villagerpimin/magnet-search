@@ -172,3 +172,45 @@ func TestRankStrictKeepsMetadataOnlyDeath(t *testing.T) {
 		t.Errorf("strict 模式只认正面证据，应保留该结果，实际 %d 条", len(strict.Kept))
 	}
 }
+
+func TestJudgeLastSeenEvidence(t *testing.T) {
+	now := time.Now()
+
+	// 索引站刚确认过有人做种：冷门但活着
+	fresh := candidate("11", "Foo 1080p", model.Unknown, 1)
+	fresh.Result.LastSeen = now.Add(-5 * time.Minute)
+	if v, conf := Judge(&fresh); v != VerdictCold || conf <= 0 {
+		t.Errorf("5 分钟前确认过应判冷门且有置信度，实际 %v/%v", v, conf)
+	}
+
+	// 6 小时前确认过：仍在存活区间
+	hours := candidate("22", "Foo 1080p", model.Unknown, 1)
+	hours.Result.LastSeen = now.Add(-5 * time.Hour)
+	if v, _ := Judge(&hours); v != VerdictCold {
+		t.Errorf("5 小时前确认过应判冷门，实际 %v", v)
+	}
+
+	// 12 小时前确认过：证据不够明确，记未知
+	mid := candidate("33", "Foo 1080p", model.Unknown, 1)
+	mid.Result.LastSeen = now.Add(-12 * time.Hour)
+	if v, _ := Judge(&mid); v != VerdictUnknown {
+		t.Errorf("12 小时前确认过应记未知，实际 %v", v)
+	}
+
+	// 超过一天没人确认：正面死亡证据
+	old := candidate("44", "Foo 1080p", model.Unknown, 1)
+	old.Result.LastSeen = now.Add(-72 * time.Hour)
+	if v, _ := Judge(&old); v != VerdictDead {
+		t.Errorf("72 小时前确认过应判死链，实际 %v", v)
+	}
+
+	// 引擎宣称有做种、且索引站刚确认过：置信度应高于单靠宣称
+	claim := candidate("55", "Foo 1080p", 4, 1)
+	_, baseConf := Judge(&claim)
+	claim2 := candidate("55", "Foo 1080p", 4, 1)
+	claim2.Result.LastSeen = now.Add(-2 * time.Minute)
+	_, boostedConf := Judge(&claim2)
+	if boostedConf <= baseConf {
+		t.Errorf("最近确认时间应提升置信度：无佐证 %v，有佐证 %v", baseConf, boostedConf)
+	}
+}

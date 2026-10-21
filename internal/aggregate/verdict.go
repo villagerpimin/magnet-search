@@ -74,6 +74,21 @@ func judge(c *Candidate, allowMetadataDeath bool) (Verdict, float64) {
 
 	conf := clamp(base*freshness*durability*conflict, 0, maxConfidence)
 
+	if source == evidenceLastSeen {
+		// 只有"最近确认时间"这一条证据时，按它的新旧决定冷门还是死链
+		age := now.Sub(c.Result.LastSeen)
+		switch {
+		case age <= lastSeenAliveWithin:
+			// 最近还确认过有人做种：冷门但活着
+			return VerdictCold, conf
+		case age <= lastSeenDeadAfter:
+			return VerdictUnknown, conf * 0.6
+		default:
+			// 超过一天没有任何人做种：正面死亡证据
+			return VerdictDead, conf * 0.9
+		}
+	}
+
 	switch {
 	case s >= alivePeersThreshold:
 		return VerdictAlive, conf
@@ -109,6 +124,18 @@ const (
 	evidenceProbe
 	// evidenceEngine 仅来自搜索引擎页面宣称的计数
 	evidenceEngine
+	// evidenceLastSeen 来自索引站的"最近确认时间"
+	evidenceLastSeen
+)
+
+// 索引站"最近确认时间"的判定阈值。
+const (
+	// lastSeenFreshWithin 多久之内算"刚刚还活着"
+	lastSeenFreshWithin = 30 * time.Minute
+	// lastSeenAliveWithin 多久之内还算活着（冷门但没死）
+	lastSeenAliveWithin = 6 * time.Hour
+	// lastSeenDeadAfter 超过这个时长没有任何确认，才判死
+	lastSeenDeadAfter = 24 * time.Hour
 )
 
 // peerEvidence 提取可信的对等端计数。
@@ -125,12 +152,20 @@ func peerEvidence(c *Candidate) (seeders, leechers int, source evidenceKind, ok 
 	if c.Live.DHTPeers != model.Unknown {
 		return c.Live.DHTPeers, 0, evidenceProbe, true
 	}
-	if c.Result.Seeders != model.Unknown {
+	if c.Result.Seeders != model.Unknown && c.Result.Seeders > 0 {
 		l := 0
 		if c.Result.Leechers != model.Unknown {
 			l = c.Result.Leechers
 		}
 		return c.Result.Seeders, l, evidenceEngine, true
+	}
+	// 引擎没给做种数或宣称是 0 时，看索引站的"最近确认时间"：
+	// 它比宣称做种数更硬——它说明那时确实有人在做种。
+	if !c.Result.LastSeen.IsZero() {
+		return 1, 0, evidenceLastSeen, true
+	}
+	if c.Result.Seeders == 0 {
+		return 0, 0, evidenceEngine, true
 	}
 	return 0, 0, evidenceNone, false
 }
@@ -155,6 +190,22 @@ func sourceConfidence(c *Candidate, source evidenceKind, now time.Time) (base fl
 		halfLife = halfLifeDHT
 		base = 0.60
 		return base, halfLife, observedAt
+	case evidenceLastSeen:
+		// 最近确认时间的观测点就是它本身，衰减交给下面的分支按年龄处理
+		observedAt = now
+		halfLife = halfLifeEngine
+		age := now.Sub(c.Result.LastSeen)
+		switch {
+		case age <= lastSeenFreshWithin:
+			base = 0.70
+		case age <= lastSeenAliveWithin:
+			base = 0.55
+		case age <= lastSeenDeadAfter:
+			base = 0.40
+		default:
+			base = 0.60
+		}
+		return base, halfLife, observedAt
 	case evidenceEngine:
 		observedAt = c.Result.ListedAt
 		if observedAt.IsZero() {
@@ -171,6 +222,13 @@ func sourceConfidence(c *Candidate, source evidenceKind, now time.Time) (base fl
 			base = 0.65
 		default:
 			base = 0.45
+		}
+		// 索引站刚刚确认过，等于又多一份独立佐证
+		if !c.Result.LastSeen.IsZero() && now.Sub(c.Result.LastSeen) <= lastSeenFreshWithin {
+			base += 0.15
+			if base > 0.90 {
+				base = 0.90
+			}
 		}
 		return base, halfLife, observedAt
 	default:
