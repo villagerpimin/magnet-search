@@ -83,6 +83,23 @@ header {
   padding: 12px 2px; font-size: 13px; color: var(--muted);
 }
 .filters .grp { display: flex; align-items: center; gap: 6px; }
+/* 自绘提示：原生 title 要悬停一秒才出、且只在小段文字上触发，等于没有 */
+.tip { position: relative; cursor: help; }
+.tip .q {
+  display: inline-block; width: 14px; height: 14px; line-height: 13px; text-align: center;
+  border-radius: 50%; border: 1px solid var(--border); color: var(--muted);
+  font-size: 10px; font-weight: 600; margin-left: 5px; vertical-align: 1px; user-select: none;
+}
+.tip:hover .q { color: var(--accent); border-color: var(--accent); }
+.tip:hover::after {
+  content: attr(data-tip);
+  position: absolute; left: 0; top: calc(100% + 7px); z-index: 60;
+  width: 300px; padding: 10px 12px; border-radius: 9px;
+  background: var(--panel); border: 1px solid var(--accent); color: var(--text);
+  font-size: 12px; line-height: 1.65; font-weight: 400; text-align: left;
+  white-space: pre-line; box-shadow: 0 10px 28px rgba(0,0,0,.4);
+  pointer-events: none;
+}
 .filters label { white-space: nowrap; }
 .filters select, .filters input[type=number] {
   background: var(--panel); color: var(--text); border: 1px solid var(--border);
@@ -217,11 +234,11 @@ main { flex: 1; padding: 4px 20px 28px; }
   </div>
   <div class="filters">
     <div class="grp">
-      <label>引擎</label>
+      <label class="tip" data-tip="参与检索的引擎。第一个「全部」可一键全选或全不选。&#10;&#10;带橙点的是境外引擎，境内与通用引擎用蓝点。&#10;选择会记在浏览器本地，下次打开保持。">引擎<span class="q">?</span></label>
       <div class="chips" id="engineChips"></div>
     </div>
     <div class="grp">
-      <label>死链</label>
+      <label class="tip" data-tip="被判为「死链」的结果怎么处理。&#10;&#10;隐藏 = 不显示（默认）｜标记 = 显示但打上死链标签｜严格 = 只认正面死亡证据（探测明确返回 0），多引擎一致报 0 也不算死｜不过滤 = 全部显示。&#10;判定死链必须有正面证据，「探测不到」只记为未知，绝不误杀。">死链<span class="q">?</span></label>
       <select id="deadFilter">
         <option value="hide">隐藏</option>
         <option value="mark">标记</option>
@@ -230,11 +247,11 @@ main { flex: 1; padding: 4px 20px 28px; }
       </select>
     </div>
     <div class="grp">
-      <label title="可信对等端少于该数的资源会被丢弃，0 表示不限制。&#10;可信对等端 = 综合 tracker 探测、DHT 与引擎宣称后，对当前真正能一起下载的人数估计；测不到时记为未知而不是 0。">最少对等端</label>
+      <label class="tip" data-tip="可信对等端少于该数的资源会被丢弃，0 表示不限制。&#10;&#10;可信对等端 = 综合 tracker 探测、DHT 与多引擎佐证后，对「当前真正能一起下载的人数」的估计，不是页面宣称的做种数。&#10;探测通道不可用时记为「未知」而不是 0，因此不会误杀探测不到但实际有人在做的冷门资源。">最少对等端<span class="q">?</span></label>
       <input id="minPeers" type="number" min="0" value="0">
     </div>
     <div class="grp">
-      <label title="为冷门但确实活着的资源在顶部预留的席位数量。&#10;冷门 = 只剩 1–2 个做种者的资源。没有这个配额，热门资源会把顶部占满，冷门资源永远露不出来。&#10;自动 = 输出条数的 20%，0 = 关闭。">冷门席位</label>
+      <label class="tip" data-tip="为「冷门但确实活着」的资源在顶部预留的席位数量。&#10;&#10;冷门 = 只剩 1–2 个做种者的资源。没有这个配额，几百个做种的热门资源会把前几名占满，冷门资源永远露不出来。&#10;自动 = 输出条数的 20%，0 = 关闭。">冷门席位<span class="q">?</span></label>
       <select id="rareQuota">
         <option value="-1">自动</option>
         <option value="0">关闭</option>
@@ -244,11 +261,11 @@ main { flex: 1; padding: 4px 20px 28px; }
       </select>
     </div>
     <div class="grp">
-      <label>每簇最多</label>
+      <label class="tip" data-tip="同一「资源簇」最多输出几条，0 表示不限制。&#10;&#10;同一个作品常有很多不同的种子：不同发布组、不同压制版本、不同画质，各自是不同的 info hash。&#10;簇 = 画质档位 + 语言 + 作品名（发布组名不参与，所以 [A] 与 [B] 的同一版本算同一簇，1080p 与 720p 算不同簇）。&#10;不限制的话，一个作品的十几个版本会把整页刷屏。默认 2。">每簇最多<span class="q">?</span></label>
       <input id="perCluster" type="number" min="0" value="2">
     </div>
     <div class="grp">
-      <label>每页</label>
+      <label class="tip" data-tip="每页显示多少条。&#10;&#10;翻页命中服务端的结果缓存，秒回，不需要重新检索。">每页<span class="q">?</span></label>
       <select id="perPage">
         <option value="10">10 条</option>
         <option value="20" selected>20 条</option>
@@ -260,7 +277,7 @@ main { flex: 1; padding: 4px 20px 28px; }
       <label class="toggle"><input id="probe" type="checkbox" checked>网络存活探测</label>
     </div>
     <div class="grp">
-      <label>代理</label>
+      <label class="tip" data-tip="代理地址，留空表示不使用。&#10;&#10;服务启动时带的 --proxy 会自动填在这里，之后的检索与自检都按它走。&#10;「仅境外引擎」= 境内与通用引擎直连、境外引擎优先走代理；「全部引擎」= 所有引擎都优先走代理。&#10;可以填多个，用逗号分隔，失败会自动换下一个。">代理<span class="q">?</span></label>
       <input id="proxy" type="text" placeholder="如 http://127.0.0.1:7890，留空=不用" size="30">
       <select id="proxyScope">
         <option value="region">仅境外引擎</option>

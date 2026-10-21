@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -224,4 +225,43 @@ func TestSearchOptionsUseSavedProxy(t *testing.T) {
 	if len(opts.Proxy) != 1 || opts.Proxy[0] != "http://127.0.0.1:7890" {
 		t.Errorf("检索参数里的代理 = %v，期望使用界面保存的代理", opts.Proxy)
 	}
+}
+
+// TestFilterLabelsHaveTips 校验每个筛选标签都带得上像样的提示文本。
+// 这条断言是回归网：曾经把提示文本和标签文字写反，导致解释被当成正文渲染、布局塌掉。
+func TestFilterLabelsHaveTips(t *testing.T) {
+	raw, err := webFS.ReadFile("web/index.html")
+	if err != nil {
+		t.Fatalf("读取内嵌页面失败: %v", err)
+	}
+	html := string(raw)
+
+	labels := 0
+	for _, m := range regexp.MustCompile(`<label class="tip" data-tip="([^"]*)">([^<]*)<span class="q">\?</span></label>`).FindAllStringSubmatch(html, -1) {
+		labels++
+		tip, name := m[1], strings.TrimSpace(m[2])
+		if name == "" {
+			t.Errorf("第 %d 个提示标签没有可见文字", labels)
+		}
+		if len([]rune(tip)) < 10 {
+			t.Errorf("标签 %q 的提示文本太短: %q", name, tip)
+		}
+		if !strings.Contains(tip, name) && !strings.Contains(name, tip[:min(len(tip), len(name))]) {
+			// 提示文本里不必出现标签名，但也不该是标签名本身
+			if tip == name {
+				t.Errorf("标签 %q 的提示文本与标签名相同，疑似写反", name)
+			}
+		}
+	}
+	if labels < 5 {
+		t.Errorf("带提示的筛选项只有 %d 个，应至少覆盖引擎、死链、最少对等端、冷门席位、每簇最多、每页、代理", labels)
+	}
+}
+
+// min 返回两个数里较小的。
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }
