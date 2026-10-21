@@ -250,7 +250,12 @@ func SearchStream(ctx context.Context, opts Options, emit func(Event)) (*Outcome
 		return nil, fmt.Errorf("没有可用引擎")
 	}
 
-	acc := &merger{seen: make(map[string]bool)}
+	acc := &merger{
+		seen:          make(map[string]bool),
+		deadFilter:    opts.DeadFilter,
+		minPeers:      opts.MinPeers,
+		minConfidence: opts.MinConfidence,
+	}
 	res := engine.SearchStream(ctx, engines, engine.Options{
 		Query:    opts.Query,
 		Limit:    opts.PerEngineLimit,
@@ -310,6 +315,12 @@ type merger struct {
 	seen map[string]bool
 	// all 累积到的全部候选
 	all []aggregate.Candidate
+	// deadFilter 死链处理策略
+	deadFilter string
+	// minPeers 最少可信对等端
+	minPeers int
+	// minConfidence 最低置信度
+	minConfidence float64
 }
 
 // add 合并一批结果，返回其中首次出现、需要立即产出的候选。
@@ -344,6 +355,10 @@ func (m *merger) add(query string, results []model.Result) []aggregate.Candidate
 		c.Verdict, c.Confidence = aggregate.Judge(&c)
 		c.Score = aggregate.Score(c, now)
 		m.all = append(m.all, c)
+		// 与最终判定保持一致：只产出通过死链、最少对等端、最低置信度过滤的条目
+		if !aggregate.PassesFilters(c, m.deadFilter, m.minPeers, m.minConfidence) {
+			continue
+		}
 		fresh = append(fresh, c)
 	}
 	return fresh

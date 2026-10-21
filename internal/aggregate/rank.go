@@ -129,6 +129,18 @@ func Rank(cands []Candidate, opts RankOptions) Ranked {
 	return Ranked{All: kept, Kept: selected, Dropped: dropped}
 }
 
+// PassesFilters 判断候选是否通过逐条过滤：死链策略、最少可信对等端、最低置信度。
+// 流式产出时用它把关，保证中途展示的条目与最终判定一致；
+// 每簇条数与冷门配额属于"选哪些"的规则，由最终排序负责，不在这里判断。
+func PassesFilters(c Candidate, deadFilter string, minPeers int, minConfidence float64) bool {
+	_, ok := filterReason(c, RankOptions{
+		DeadFilter:    deadFilter,
+		MinPeers:      minPeers,
+		MinConfidence: minConfidence,
+	})
+	return ok
+}
+
 // filterReason 判断候选是否应被过滤，返回原因与是否通过。
 func filterReason(c Candidate, opts RankOptions) (string, bool) {
 	switch opts.DeadFilter {
