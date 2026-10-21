@@ -35,6 +35,14 @@ go build -o msearch ./cmd/msearch
 浏览器打开后即可使用：顶部搜索框，右侧引擎状态点（点击"检测"逐个探测可达性），
 下方筛选条可切换引擎、生效死链过滤策略、设最少对等端数、冷门席位配额与每簇条数。
 
+**分页**：每页条数可选 10 / 20 / 50 / 100，底部有页码导航（首页、上一页、页码窗口、下一页、末页）
+与"共 N 条 · 第 X/Y 页"。翻页命中服务端的结果缓存（5 分钟），不会重新跑一遍网络检索。
+
+**代理**：筛选条右侧可直接填代理地址（留空表示不用），并选择作用范围
+——「仅境外引擎」（境内与通用引擎直连，失败再走代理，推荐）或「全部引擎」。
+点「应用」保存到服务端，之后的检索与自检都按此设置；也可以用命令行
+`--proxy http://127.0.0.1:7890` 或 `--proxy-engine bt4g=http://...` 指定。
+
 结果卡片给出**存活状态徽章**（活跃 / 冷门 / 未知 / 死链）、可信对等端数、相关度、
 来源引擎与来源标签；右侧色条把排序分拆成"相关度 / 存活证据 / 群体规模 / 新鲜度"四段，
 点"详情"可看到 info hash、全部 tracker 与分项数值；点"复制磁力"直接复制磁力链接。
@@ -47,6 +55,11 @@ go build -o msearch ./cmd/msearch
 | `GET /api/search?q=...&limit=20&engines=a,b&dead_filter=hide&probe=1` | 搜索，返回排序结果与分数分项 |
 | `GET /api/engines` | 引擎清单 |
 | `GET /api/check` | 逐个引擎的可达性自检 |
+| `GET /api/settings` | 读取当前代理设置 |
+| `POST /api/settings` | 保存代理设置，body 为 `{"proxy":"…","proxy_scope":"region\|all"}` |
+
+搜索接口另外支持 `per_page`（每页条数，默认 20）与 `page`（页码，从 1 开始），
+返回体含 `total`、`page`、`per_page`、`total_pages`、`pool_size`。
 
 > 服务默认只监听回环地址。用 `--addr 0.0.0.0:8080` 对外开放时，服务本身没有鉴权，
 > 请自行放在反向代理与访问控制之后。
@@ -82,10 +95,31 @@ go build -o msearch ./cmd/msearch
 | `rutor` | overseas | HTML | 俄文站，提供每条 S/L/C 统计 |
 | `tokyotosho` | overseas | RSS / HTML | 东京所 tracker，逐条给 S/L/C |
 | `solidtorrents` | overseas | HTML | 与 bitsearch 同模板 |
+| `knaben` | overseas | HTML | 逐条给出"最近确认时间"，是比做种数更硬的存活信号 |
+
+每个引擎都带**镜像兜底**：主域名不可达时自动按顺序换下一个镜像。例如
+`bt4g` → bt4gprx.com / bt4g.org，`yts` → yts.rs / yts.gg / yts.am，
+`nyaa` → nyaa.si / nyaa.ink。`msearch check` 会显示每个引擎的实际可用域名。
 
 ## 海外资源：代理与解封
 
 实测结论（见 `docs/SPEC.md`）：**nyaa.si、btdig.com、solidtorrents.to、magnetdl.com、1337x.to、yts.mx、anidex.moe、rutracker.org、thepiratebay.org 在境内被 DNS/SNI 阻断**，直接访问会超时或握手失败。
+
+补上 Clash 规则后，**magnetdl.homes、knaben.org、bt4g.org、yts.gg、yts.am** 变得可达，
+而 `1337xx.to` / `x1337x.eu` 能过 TLS 但仍被 Cloudflare 挑战。逐个实测的结论：
+
+| 站点 | 状态 | 处理 |
+|---|---|---|
+| `knaben.org` | 可用 | 已接入引擎 |
+| `bt4g.org` | 可用 | 作为 bt4g 的镜像 |
+| `yts.gg` / `yts.am` | 可用 | 作为 yts 的镜像 |
+| `magnetdl.co` / `.homes` | 搜索页可开，**详情页由 JS 渲染** | 拿不到磁力，暂不接入 |
+| `1337xx.to` / `x1337x.eu` | Cloudflare 全站挑战 | 暂不接入 |
+| `btdig` / `solidtorrents` / `anidex` / `rutracker` / `nyaa.si` | 仍被阻断 | 等网络环境改善 |
+
+> 判断某个站能不能接入的标准是**能否拿到磁力**，而不是首页能否打开。
+> magnetdl 就是一个典型：列表页能解析出标题、大小、做种数，但没有磁力链接，
+> 详情页又是 JS 渲染的，纯 HTTP 客户端拿不到 info hash，因此接进来也没有意义。
 
 三种可行做法：
 
