@@ -23,6 +23,9 @@ type Result struct {
 	Leechers int
 	// PublishDate 资源发布时间，引擎未提供时为零值
 	PublishDate time.Time
+	// LastSeen 索引站最近一次确认该资源存在于种子网络的时间，零值表示未知。
+	// 这类"最近确认"信号比页面宣称的做种数更硬，可直接作为存活证据。
+	LastSeen time.Time
 	// ListedAt 本次抓取到该结果的时间，用于"最近仍在列表中"的弱信号
 	ListedAt time.Time
 	// Source 引擎标识，例如 apibay、tokyotosho
