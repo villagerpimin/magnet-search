@@ -2,6 +2,10 @@
 /msearch
 /dist/
 
+# 本地配置（含数据库与登录口令，不要提交）
+/config.yaml
+/config.yml
+
 # 本地调试
 *.log
 .DS_Store
