@@ -13,6 +13,9 @@ import (
 	"github.com/pigzhu/magnet-search/internal/app"
 	"github.com/pigzhu/magnet-search/internal/engine"
 	"github.com/pigzhu/magnet-search/internal/server"
+	"github.com/pigzhu/magnet-search/internal/store"
+
+	"golang.org/x/crypto/bcrypt"
 )
 
 // runCheck 逐个测试引擎在当前网络下的可用性。
@@ -110,7 +113,31 @@ func runServe(args []string) int {
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 
-	srv := server.New(opts.app)
+	// 连接数据库；连接失败时降级为"不启用数据库"，服务仍然可用
+	var st *store.Store
+	if opts.dbDSN != "" {
+		opened, err := store.Open(ctx, store.Config{DSN: opts.dbDSN})
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "警告：数据库不可用，已按未启用数据库运行：", err)
+		} else {
+			st = opened
+			defer st.Close()
+			fmt.Println("数据库：已连接")
+		}
+	} else {
+		fmt.Println("数据库：未启用（不记录检索、不需要登录）")
+	}
+
+	// 启动时按参数设置账号，方便首次初始化或改密
+	if st != nil && opts.username != "" && opts.password != "" {
+		if err := setAccount(ctx, st, opts.username, opts.password); err != nil {
+			fmt.Fprintln(os.Stderr, "设置账号失败:", err)
+		} else {
+			fmt.Printf("登录账号：%s（已更新）\n", opts.username)
+		}
+	}
+
+	srv := server.New(opts.app, st)
 	fmt.Printf("磁力聚合搜索界面已启动： http://%s\n", opts.addr)
 	fmt.Printf("代理： %v   引擎： %v\n", opts.app.Proxy, opts.app.Engines)
 	if !isLoopbackAddr(opts.addr) {
@@ -137,4 +164,16 @@ func isLoopbackAddr(addr string) bool {
 // splitHostPort 拆分 host:port。
 func splitHostPort(addr string) (string, string, error) {
 	return net.SplitHostPort(addr)
+}
+
+// setAccount 把账号写入数据库（启动时按参数初始化或改密）。
+func setAccount(ctx context.Context, st *store.Store, username, password string) error {
+	if len(password) < 6 {
+		return fmt.Errorf("密码至少 6 位")
+	}
+	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	if err != nil {
+		return err
+	}
+	return st.SetAccount(ctx, username, hash)
 }

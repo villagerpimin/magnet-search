@@ -39,6 +39,12 @@ func usage() {
 Web 选项:
   --addr host:port     监听地址（默认 127.0.0.1:8080）
 
+数据库与登录:
+  --db-dsn dsn         MySQL 连接串，配置后启用检索记录与登录（也可用 MSEARCH_DB_DSN）
+  --db off             关闭数据库（即使配置了连接串）
+  --username name      启动时设置/更新登录账号
+  --password pass      账号密码（也可用 MSEARCH_PASSWORD，避免留在命令历史里）
+
 输出选项:
   --json               以 JSON 输出
   --quiet              只输出磁力链接

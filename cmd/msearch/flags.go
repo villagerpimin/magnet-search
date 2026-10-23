@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -27,6 +28,12 @@ type cliOptions struct {
 	verbose bool
 	// addr Web 服务监听地址
 	addr string
+	// dbDSN MySQL 连接串，空表示不启用数据库
+	dbDSN string
+	// username 启动时设置/更新的登录账号
+	username string
+	// password 启动时设置/更新的登录密码
+	password string
 }
 
 // parseArgs 解析命令行参数。
@@ -155,6 +162,17 @@ func parseArgs(args []string) (*cliOptions, error) {
 			opts.app.Retries = n
 		case "addr":
 			opts.addr = value
+		case "db-dsn":
+			opts.dbDSN = value
+		case "db":
+			// --db off 等价于清空连接串
+			if value == "off" || value == "false" || value == "0" {
+				opts.dbDSN = ""
+			}
+		case "username":
+			opts.username = value
+		case "password":
+			opts.password = value
 		case "json":
 			opts.json = true
 		case "quiet":
@@ -166,6 +184,14 @@ func parseArgs(args []string) (*cliOptions, error) {
 		default:
 			return nil, fmt.Errorf("未知选项: %s", arg)
 		}
+	}
+
+	// 环境变量作为兜底，避免把口令写在命令历史里
+	if opts.dbDSN == "" {
+		opts.dbDSN = strings.TrimSpace(os.Getenv("MSEARCH_DB_DSN"))
+	}
+	if opts.password == "" {
+		opts.password = os.Getenv("MSEARCH_PASSWORD")
 	}
 
 	opts.query = strings.Join(positional, " ")
