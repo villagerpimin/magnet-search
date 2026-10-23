@@ -2,11 +2,11 @@ package main
 
 import (
 	"fmt"
-	"os"
 	"strings"
 	"time"
 
 	"github.com/pigzhu/magnet-search/internal/app"
+	"github.com/pigzhu/magnet-search/internal/config"
 )
 
 // boolFlags 是不接受参数的开关，解析时不会吞掉后面的位置参数。
@@ -26,32 +26,54 @@ type cliOptions struct {
 	quiet bool
 	// verbose 输出调试信息
 	verbose bool
-	// addr Web 服务监听地址
-	addr string
-	// dbDSN MySQL 连接串，空表示不启用数据库
-	dbDSN string
-	// username 启动时设置/更新的登录账号
-	username string
-	// password 启动时设置/更新的登录密码
-	password string
+	// configPath 配置文件路径，命令行用 --config 指定
+	configPath string
+}
+
+// defaultAppOptions 返回命令行未指定时的内置默认值。
+func defaultAppOptions() app.Options {
+	return app.Options{
+		DeadFilter:    "hide",
+		RareQuota:     -1,
+		RareMaxPeers:  app.DefaultRareMaxPeers,
+		PerCluster:    app.DefaultPerCluster,
+		ClusterKey:    "resolution",
+		Probe:         true,
+		Timeout:       15 * time.Second,
+		EngineTimeout: 15 * time.Second,
+		Retries:       2,
+	}
+}
+
+// findConfigFlag 扫描 --config / -c / --config=路径。
+func findConfigFlag(args []string) string {
+	for i := 0; i < len(args); i++ {
+		arg := strings.TrimSpace(args[i])
+		switch {
+		case arg == "--config" || arg == "-c":
+			if i+1 < len(args) {
+				return args[i+1]
+			}
+		case strings.HasPrefix(arg, "--config="):
+			return strings.TrimPrefix(arg, "--config=")
+		}
+	}
+	return ""
 }
 
 // parseArgs 解析命令行参数。
 // 支持 --flag=value 与 --flag value 两种写法；布尔开关不消费后续参数。
 func parseArgs(args []string) (*cliOptions, error) {
-	opts := &cliOptions{
-		app: app.Options{
-			DeadFilter:    "hide",
-			RareQuota:     -1,
-			RareMaxPeers:  app.DefaultRareMaxPeers,
-			PerCluster:    app.DefaultPerCluster,
-			ClusterKey:    "resolution",
-			Probe:         true,
-			Timeout:       15 * time.Second,
-			EngineTimeout: 15 * time.Second,
-			Retries:       2,
-		},
-		addr: "127.0.0.1:8080",
+	opts := &cliOptions{app: defaultAppOptions()}
+
+	// 先看有没有 --config：有就用配置文件里的检索参数做底，命令行再覆盖
+	if path := findConfigFlag(args); path != "" {
+		cfg, err := config.Load(path)
+		if err != nil {
+			return nil, err
+		}
+		opts.app = cfg.Options()
+		opts.configPath = path
 	}
 
 	var positional []string
@@ -160,19 +182,9 @@ func parseArgs(args []string) (*cliOptions, error) {
 				return nil, fmt.Errorf("解析 --retries 失败: %w", err)
 			}
 			opts.app.Retries = n
-		case "addr":
-			opts.addr = value
-		case "db-dsn":
-			opts.dbDSN = value
-		case "db":
-			// --db off 等价于清空连接串
-			if value == "off" || value == "false" || value == "0" {
-				opts.dbDSN = ""
-			}
-		case "username":
-			opts.username = value
-		case "password":
-			opts.password = value
+		case "config":
+			// 已在前面加载过
+			opts.configPath = value
 		case "json":
 			opts.json = true
 		case "quiet":
@@ -184,14 +196,6 @@ func parseArgs(args []string) (*cliOptions, error) {
 		default:
 			return nil, fmt.Errorf("未知选项: %s", arg)
 		}
-	}
-
-	// 环境变量作为兜底，避免把口令写在命令历史里
-	if opts.dbDSN == "" {
-		opts.dbDSN = strings.TrimSpace(os.Getenv("MSEARCH_DB_DSN"))
-	}
-	if opts.password == "" {
-		opts.password = os.Getenv("MSEARCH_PASSWORD")
 	}
 
 	opts.query = strings.Join(positional, " ")

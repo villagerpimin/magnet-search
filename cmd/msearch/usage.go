@@ -10,10 +10,13 @@ func usage() {
 
 用法:
   msearch [选项] <关键词...>     并行检索多个引擎，合并去重后按存活度排序
-  msearch serve [选项]          启动本地 Web 界面（默认 http://127.0.0.1:8080）
+  msearch serve [--config 路径] 按配置文件启动 Web 服务（默认读 ./config.yaml）
   msearch check [选项]          自检：逐个测试引擎在当前网络下是否可用
   msearch engines               列出全部引擎及其区域
   msearch version               打印版本
+
+serve 的全部配置（监听地址、代理、数据库、账号、检索默认值）都写在配置文件里，
+不再接受命令行开关；改完配置重启即可生效。配置项说明见 config.example.yaml。
 
 检索选项:
   --engine list        指定引擎（逗号分隔，默认全部）
@@ -36,14 +39,8 @@ func usage() {
   --engine-timeout dur 单引擎墙钟预算（默认 25s）
   --retries n          单次请求的重试次数（默认 2）
 
-Web 选项:
-  --addr host:port     监听地址（默认 127.0.0.1:8080）
-
-数据库与登录:
-  --db-dsn dsn         MySQL 连接串，配置后启用检索记录与登录（也可用 MSEARCH_DB_DSN）
-  --db off             关闭数据库（即使配置了连接串）
-  --username name      启动时设置/更新登录账号
-  --password pass      账号密码（也可用 MSEARCH_PASSWORD，避免留在命令历史里）
+配置文件:
+  --config path        指定配置文件（serve 默认 ./config.yaml；检索与自检用它取网络设置）
 
 输出选项:
   --json               以 JSON 输出
