@@ -18,6 +18,7 @@ import (
 	"github.com/pigzhu/magnet-search/internal/app"
 	"github.com/pigzhu/magnet-search/internal/engine"
 	"github.com/pigzhu/magnet-search/internal/model"
+	"github.com/pigzhu/magnet-search/internal/store"
 )
 
 //go:embed web
@@ -45,6 +46,10 @@ type Server struct {
 	settings Settings
 	// settingsMu 保护 settings
 	settingsMu sync.RWMutex
+	// store 检索记录与账号的存储，nil 表示未启用数据库
+	store *store.Store
+	// authSecret 会话签名密钥
+	authSecret []byte
 }
 
 // Settings 是界面上可调整的检索设置。
@@ -53,10 +58,12 @@ type Settings struct {
 	Proxy string `json:"proxy"`
 	// ProxyScope 代理作用范围：region 只代理境外引擎，all 代理全部引擎
 	ProxyScope string `json:"proxy_scope"`
+	// DBEnabled 数据库是否启用；关闭时不记录检索、也不需要登录
+	DBEnabled bool `json:"db_enabled"`
 }
 
 // New 创建 Web 服务。
-func New(defaults app.Options) *Server {
+func New(defaults app.Options, st *store.Store) *Server {
 	reg := engine.NewRegistry()
 	engine.RegisterAll(reg)
 	return &Server{
@@ -67,7 +74,10 @@ func New(defaults app.Options) *Server {
 			// 命令行传入的代理作为初始设置，界面打开时直接可见
 			Proxy:      strings.Join(defaults.Proxy, ","),
 			ProxyScope: app.ProxyScopeRegion,
+			DBEnabled:  st != nil,
 		},
+		store:      st,
+		authSecret: newAuthSecret(),
 	}
 }
 
@@ -83,10 +93,14 @@ func (s *Server) Handler() http.Handler {
 
 	mux.HandleFunc("/api/engines", s.handleEngines)
 	mux.HandleFunc("/api/settings", s.handleSettings)
-	mux.HandleFunc("/api/search", s.handleSearch)
-	mux.HandleFunc("/api/search/stream", s.handleSearchStream)
-	mux.HandleFunc("/api/check", s.handleCheck)
-	mux.HandleFunc("/api/check/stream", s.handleCheckStream)
+	mux.HandleFunc("/api/auth", s.handleAuth)
+	mux.HandleFunc("/api/login", s.handleLogin)
+	mux.HandleFunc("/api/logout", s.handleLogout)
+	mux.HandleFunc("/api/account", s.handleAccount)
+	mux.HandleFunc("/api/search", s.requireAuth(s.handleSearch))
+	mux.HandleFunc("/api/search/stream", s.requireAuth(s.handleSearchStream))
+	mux.HandleFunc("/api/check", s.requireAuth(s.handleCheck))
+	mux.HandleFunc("/api/check/stream", s.requireAuth(s.handleCheckStream))
 
 	return mux
 }
@@ -153,6 +167,10 @@ func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
 		}
 		if incoming.ProxyScope != app.ProxyScopeAll {
 			incoming.ProxyScope = app.ProxyScopeRegion
+		}
+		// 没有配置数据库连接时，开关只能是关闭状态
+		if s.store == nil {
+			incoming.DBEnabled = false
 		}
 		incoming.Proxy = strings.TrimSpace(incoming.Proxy)
 		s.settingsMu.Lock()
@@ -459,6 +477,8 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 		resp.Results = append(resp.Results, newSearchResult(c, now))
 	}
 
+	s.logSearch(r, opts, len(out.Results), out.Elapsed)
+
 	writeJSON(w, http.StatusOK, resp)
 }
 
@@ -514,6 +534,23 @@ func searchCacheKey(opts app.Options) string {
 		strconv.Itoa(opts.PerCluster),
 		strconv.FormatBool(opts.Probe),
 	}, "|")
+}
+
+// logSearch 把一次检索写入数据库，数据库未启用时静默跳过。
+func (s *Server) logSearch(r *http.Request, opts app.Options, resultCount int, elapsed time.Duration) {
+	if !s.dbEnabled() {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	_ = s.store.LogSearch(ctx, store.SearchLog{
+		Query:       opts.Query,
+		IP:          clientIP(r),
+		UserAgent:   r.UserAgent(),
+		Engines:     strings.Join(opts.Engines, ","),
+		ResultCount: resultCount,
+		ElapsedMS:   int(elapsed.Milliseconds()),
+	})
 }
 
 // writeJSON 写出 JSON 响应。

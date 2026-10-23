@@ -13,7 +13,7 @@ import (
 )
 
 func newTestServer() *httptest.Server {
-	s := New(app.Options{})
+	s := New(app.Options{}, nil)
 	ts := httptest.NewServer(s.Handler())
 	return ts
 }
@@ -126,7 +126,7 @@ func TestPaginate(t *testing.T) {
 }
 
 func TestSettingsAPI(t *testing.T) {
-	srv := New(app.Options{})
+	srv := New(app.Options{}, nil)
 	ts := httptest.NewServer(srv.Handler())
 	defer ts.Close()
 
@@ -190,7 +190,7 @@ func TestSSEWriterFormat(t *testing.T) {
 
 func TestSettingsPreferCommandLineProxy(t *testing.T) {
 	// 命令行传入的代理应当作为界面的初始设置，界面打开即可见
-	srv := New(app.Options{Proxy: []string{"http://127.0.0.1:7890"}})
+	srv := New(app.Options{Proxy: []string{"http://127.0.0.1:7890"}}, nil)
 	ts := httptest.NewServer(srv.Handler())
 	defer ts.Close()
 
@@ -212,7 +212,7 @@ func TestSettingsPreferCommandLineProxy(t *testing.T) {
 }
 
 func TestSearchOptionsUseSavedProxy(t *testing.T) {
-	srv := New(app.Options{})
+	srv := New(app.Options{}, nil)
 	srv.settings.Proxy = "http://127.0.0.1:7890"
 	ts := httptest.NewServer(srv.Handler())
 	defer ts.Close()

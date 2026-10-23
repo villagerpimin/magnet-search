@@ -146,6 +146,7 @@ func (s *Server) handleSearchStream(w http.ResponseWriter, r *http.Request) {
 	for _, c := range out.Results[start:end] {
 		final.Results = append(final.Results, newSearchResult(c, now))
 	}
+	s.logSearch(r, opts, len(out.Results), out.Elapsed)
 	sse.send("done", final)
 }
 
