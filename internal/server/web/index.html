@@ -214,6 +214,111 @@ main { flex: 1; padding: 4px 20px 28px; }
   transition: opacity .2s; z-index: 60;
 }
 .toast.show { opacity: 1; }
+
+/* 详情抽屉的关闭按钮 */
+.drawer-head {
+  display: flex; align-items: flex-start; gap: 10px;
+  position: sticky; top: -18px; z-index: 2;
+  background: var(--panel); padding: 4px 0 10px; margin-bottom: 2px;
+}
+.drawer-head h3 { flex: 1; margin: 0; }
+.drawer-close {
+  font-size: 17px; line-height: 1; padding: 5px 9px; border-radius: 8px;
+  color: var(--muted); border: 1px solid var(--border);
+}
+.drawer-close:hover { color: var(--text); border-color: var(--accent); }
+
+/* 折叠按钮默认只在手机端出现 */
+.filters-toggle { display: none; }
+
+/* 登录遮罩 */
+.gate {
+  position: fixed; inset: 0; z-index: 80; display: none;
+  align-items: center; justify-content: center; padding: 20px;
+  background: rgba(8, 10, 14, .72); backdrop-filter: blur(3px);
+}
+.gate.open { display: flex; }
+.gate-card {
+  width: min(360px, 100%); background: var(--panel); border: 1px solid var(--border);
+  border-radius: 14px; padding: 22px 20px 18px; box-shadow: 0 20px 60px rgba(0,0,0,.45);
+}
+.gate-title { font-size: 17px; font-weight: 650; margin-bottom: 6px; }
+.gate-sub { color: var(--muted); font-size: 12.5px; line-height: 1.6; margin-bottom: 16px; }
+.gate-field { display: block; margin-bottom: 12px; }
+.gate-field span { display: block; color: var(--muted); font-size: 12.5px; margin-bottom: 5px; }
+.gate-field input {
+  width: 100%; padding: 10px 12px; font-size: 15px; color: var(--text);
+  background: var(--panel-2); border: 1px solid var(--border); border-radius: 9px; outline: none;
+}
+.gate-field input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-dim); }
+.gate-submit {
+  width: 100%; padding: 11px; margin-top: 4px; border-radius: 9px;
+  background: var(--accent); color: #fff; font-weight: 600; font-size: 14.5px;
+}
+.gate-submit:disabled { opacity: .6; cursor: progress; }
+.gate-err { color: var(--dead); font-size: 12.5px; min-height: 18px; margin-top: 8px; }
+.gate-foot { margin-top: 6px; font-size: 12.5px; text-align: center; }
+
+/* ============ 手机端 ============ */
+@media (max-width: 640px) {
+  /* 筛选项在手机上占好几行，先折叠起来，把首屏留给结果 */
+  .filters-toggle {
+    display: flex; align-items: center; justify-content: space-between; width: 100%;
+    margin-top: 8px; padding: 9px 13px; font-size: 13px; color: var(--muted);
+    background: var(--panel); border: 1px solid var(--border); border-radius: 9px;
+  }
+  .filters { display: none; padding: 10px 2px 4px; }
+  .filters.open { display: flex; }
+  .drawer-close { min-width: 40px; min-height: 40px; font-size: 18px; }
+  header { padding: 10px 12px; gap: 10px; }
+  .brand { font-size: 14px; }
+  .brand .logo { width: 18px; height: 18px; font-size: 10px; }
+  .health { font-size: 11px; gap: 6px; }
+  .health .dots { gap: 3px; }
+  .health .dot { width: 7px; height: 7px; }
+
+  .searchwrap { padding: 12px 12px 0; }
+  .searchbar { gap: 8px; }
+  /* 16px 可避免 iOS 聚焦时自动放大页面 */
+  .searchbar input { padding: 11px 12px; font-size: 16px; }
+  .searchbar button { padding: 0 15px; font-size: 14px; }
+
+  main { padding: 0 12px 22px; }
+  .filters { gap: 7px 10px; padding: 10px 0; font-size: 12px; }
+  .filters .grp { gap: 5px; flex-wrap: wrap; }
+  .filters input[type=text] { width: 100%; min-width: 0; }
+  .filters select, .filters input[type=number] { font-size: 12px; }
+  .tip:hover::after { left: auto; right: 0; width: min(86vw, 300px); }
+  .status { font-size: 11.5px; gap: 6px 10px; padding: 4px 0 10px; }
+
+  /* 结果卡片：状态与按钮折到下一行，标题占满宽度 */
+  .card { grid-template-columns: 22px 1fr; gap: 6px 9px; padding: 11px 12px; }
+  .rank { font-size: 12px; padding-top: 2px; }
+  .title { font-size: 14px; line-height: 1.45; }
+  .meta { font-size: 11.5px; gap: 2px 9px; margin-top: 3px; }
+  .side {
+    grid-column: 2; flex-direction: row; flex-wrap: wrap;
+    align-items: center; justify-content: flex-start; gap: 8px;
+  }
+  .side .bar { order: 3; width: 100%; height: 4px; }
+  .badge { font-size: 11px; padding: 1px 8px; }
+  .rowbtns { gap: 8px; }
+  .rowbtns .mini { padding: 6px 13px; font-size: 12.5px; }
+
+  .pager { gap: 5px; padding: 14px 0 4px; }
+  .pager button { min-width: 34px; height: 34px; padding: 0 8px; font-size: 12.5px; }
+  .pager .info { width: 100%; text-align: center; margin: 8px 0 0; }
+
+  /* 抽屉铺满整屏时，靠右上角的关闭按钮退出（原来只能靠点遮罩，手机上点不到） */
+  .drawer { width: 100%; padding: 14px 16px calc(28px + env(safe-area-inset-bottom)); }
+  .drawer-head { top: -14px; }
+  .drawer .kv { grid-template-columns: 78px 1fr; }
+  .copyrow { flex-direction: column; }
+  .copyrow .mini { width: 100%; padding: 9px; }
+  .parts .row { grid-template-columns: 62px 1fr 42px; }
+
+  .gate-card { padding: 20px 16px 16px; }
+}
 </style>
 </head>
 <body>
@@ -224,6 +329,9 @@ main { flex: 1; padding: 4px 20px 28px; }
     <span class="dots" id="healthDots"></span>
     <span id="healthText">引擎状态未知</span>
     <button id="healthBtn" type="button">检测</button>
+    <span id="accountChip" style="display:none">
+      <button id="accountBtn" type="button" title="账号设置">账号</button>
+    </span>
   </div>
 </header>
 
@@ -232,6 +340,9 @@ main { flex: 1; padding: 4px 20px 28px; }
     <input id="q" type="search" placeholder="输入关键词，例如：ubuntu 24.04、葬送のフリーレン、Matrix" autocomplete="off" spellcheck="false">
     <button id="go" type="button">搜索</button>
   </div>
+  <button class="filters-toggle" id="filtersToggle" type="button">
+    <span id="filtersSummary">筛选</span><span>▾</span>
+  </button>
   <div class="filters">
     <div class="grp">
       <label class="tip" data-tip="参与检索的引擎。第一个「全部」可一键全选或全不选。&#10;&#10;带橙点的是境外引擎，境内与通用引擎用蓝点。&#10;选择会记在浏览器本地，下次打开保持。">引擎<span class="q">?</span></label>
@@ -276,6 +387,10 @@ main { flex: 1; padding: 4px 20px 28px; }
     <div class="grp">
       <label class="toggle"><input id="probe" type="checkbox" checked>网络存活探测</label>
     </div>
+    <div class="grp" id="dbGrp" style="display:none">
+      <label class="tip" data-tip="开启后每一次检索都会写入 MySQL（关键词、时间、来源 IP、结果条数），并启用登录校验。&#10;&#10;关闭后不记录、也不需要登录。&#10;服务未配置数据库连接时这项不可用。">记录到数据库<span class="q">?</span></label>
+      <label class="toggle"><input id="dbEnabled" type="checkbox">启用</label>
+    </div>
     <div class="grp">
       <label class="tip" data-tip="代理地址，留空表示不使用。&#10;&#10;服务启动时带的 --proxy 会自动填在这里，之后的检索与自检都按它走。&#10;「仅境外引擎」= 境内与通用引擎直连、境外引擎优先走代理；「全部引擎」= 所有引擎都优先走代理。&#10;可以填多个，用逗号分隔，失败会自动换下一个。">代理<span class="q">?</span></label>
       <input id="proxy" type="text" placeholder="如 http://127.0.0.1:7890，留空=不用" size="30">
@@ -298,7 +413,10 @@ main { flex: 1; padding: 4px 20px 28px; }
 
 <div class="mask" id="mask"></div>
 <aside class="drawer" id="drawer">
-  <h3 id="dTitle">详情</h3>
+  <div class="drawer-head">
+    <h3 id="dTitle">详情</h3>
+    <button class="drawer-close" id="dClose" type="button" aria-label="关闭">✕</button>
+  </div>
   <div class="meta" id="dMeta"></div>
   <div class="copyrow">
     <input id="dMagnet" readonly>
@@ -308,6 +426,30 @@ main { flex: 1; padding: 4px 20px 28px; }
   <dl class="kv" id="dKv"></dl>
   <div class="hint" id="dHint"></div>
 </aside>
+<div class="gate" id="gate">
+  <form class="gate-card" id="gateForm" autocomplete="on">
+    <div class="gate-title" id="gateTitle">登录</div>
+    <div class="gate-sub" id="gateSub">该服务已开启检索记录，检索需要登录。</div>
+    <label class="gate-field">
+      <span>用户名</span>
+      <input id="gateUser" type="text" autocomplete="username" required>
+    </label>
+    <label class="gate-field">
+      <span>密码</span>
+      <input id="gatePass" type="password" autocomplete="current-password" required>
+    </label>
+    <label class="gate-field" id="gateConfirmWrap" style="display:none">
+      <span>确认密码</span>
+      <input id="gatePass2" type="password" autocomplete="new-password">
+    </label>
+    <button class="gate-submit" id="gateSubmit" type="submit">登录</button>
+    <div class="gate-err" id="gateErr"></div>
+    <div class="gate-foot" id="gateFoot" style="display:none">
+      <a href="#" id="gateLogout">退出登录</a>
+    </div>
+  </form>
+</div>
+
 <div class="toast" id="toast"></div>
 
 <script>
@@ -319,6 +461,8 @@ let lastData = null;
 let stream = null;
 let liveResults = [];
 let engineProgress = {};
+let authState = { db_enabled: false, db_available: false, needs_setup: false, logged_in: false };
+let gateMode = "login";
 
 const VERDICT = {
   alive:   { cls: "alive",   text: "活跃" },
@@ -382,6 +526,7 @@ async function loadEngines() {
   }
   if (prefs && prefs.perPage) $("perPage").value = prefs.perPage;
   renderEngineChips();
+  updateFiltersSummary();
 }
 
 // renderEngineChips 渲染引擎开关，第一项是"全部"快捷开关。
@@ -399,6 +544,7 @@ function renderEngineChips() {
     else activeEngines = new Set(engines.map((e) => e.name));
     renderEngineChips();
     savePrefs();
+    updateFiltersSummary();
   };
   box.appendChild(all);
 
@@ -413,6 +559,7 @@ function renderEngineChips() {
       else activeEngines.add(e.name);
       renderEngineChips();
       savePrefs();
+      updateFiltersSummary();
     };
     box.appendChild(chip);
   });
@@ -522,9 +669,14 @@ function streamSearch(q) {
       renderPager(d);
       resolve();
     });
-    es.addEventListener("error", () => {
+    es.addEventListener("error", async () => {
       es.close();
       stream = null;
+      // 可能是会话失效导致 401，回到登录面板
+      const state = await loadAuth();
+      if (state.db_enabled && !state.logged_in) {
+        $("status").innerHTML = `<span class="warn">登录状态已失效，请重新登录</span>`;
+      }
       resolve();
     });
   });
@@ -534,6 +686,11 @@ function streamSearch(q) {
 async function fetchPage(q, page) {
   try {
     const resp = await fetch("/api/search?" + buildParams(q, page).toString());
+    if (resp.status === 401) {
+      await loadAuth();
+      $("status").innerHTML = `<span class="warn">请先登录</span>`;
+      return;
+    }
     const data = await resp.json();
     if (data.error) throw new Error(data.error);
     lastData = data;
@@ -744,13 +901,15 @@ async function loadSettings() {
     const s = await (await fetch("/api/settings")).json();
     $("proxy").value = s.proxy || "";
     $("proxyScope").value = s.proxy_scope === "all" ? "all" : "region";
+    $("dbEnabled").checked = !!s.db_enabled;
   } catch (e) { /* 读不到就保持默认 */ }
 }
 
-async function applySettings() {
+async function saveSettings(dbEnabled) {
   const body = {
     proxy: $("proxy").value.trim(),
     proxy_scope: $("proxyScope").value,
+    db_enabled: dbEnabled != null ? dbEnabled : $("dbEnabled").checked,
   };
   try {
     await fetch("/api/settings", {
@@ -758,11 +917,135 @@ async function applySettings() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
     });
-    toast(body.proxy ? "已应用代理：" + body.proxy : "已关闭代理");
+    return true;
   } catch (e) {
     toast("设置保存失败");
+    return false;
   }
 }
+
+// applySettings 界面上点「应用」时保存代理设置。
+async function applySettings() {
+  const ok = await saveSettings();
+  if (ok) toast($("proxy").value.trim() ? "已应用代理：" + $("proxy").value.trim() : "已关闭代理");
+}
+
+/* ---------- 登录与账号 ---------- */
+async function loadAuth() {
+  try {
+    authState = await (await fetch("/api/auth")).json();
+  } catch (e) {
+    authState = { db_enabled: false, db_available: false, needs_setup: false, logged_in: false };
+  }
+  applyAuth();
+  return authState;
+}
+
+// applyAuth 依据认证状态调整界面：数据库开关、账号入口、登录遮罩。
+function applyAuth() {
+  $("dbGrp").style.display = authState.db_available ? "" : "none";
+  $("dbEnabled").checked = !!authState.db_enabled;
+  $("accountChip").style.display = authState.logged_in ? "" : "none";
+
+  const needGate = authState.db_enabled && (authState.needs_setup || !authState.logged_in);
+  if (needGate) {
+    showGate(authState.needs_setup ? "setup" : "login");
+  } else {
+    $("gate").classList.remove("open");
+  }
+}
+
+// showGate 显示登录/首次设置/修改账号面板。
+function showGate(mode) {
+  gateMode = mode;
+  const texts = {
+    login:  { title: "登录", sub: "该服务已开启检索记录，检索需要登录。", submit: "登录", confirm: false },
+    setup:  { title: "首次设置登录账号", sub: "服务已开启检索记录。请先设置一个账号，之后检索需要登录。", submit: "设置并登录", confirm: true },
+    change: { title: "修改账号密码", sub: "留空密码则只改用户名；修改后立即生效。", submit: "保存", confirm: true },
+  };
+  const t = texts[mode] || texts.login;
+  $("gateTitle").textContent = t.title;
+  $("gateSub").textContent = t.sub;
+  $("gateSubmit").textContent = t.submit;
+  $("gateConfirmWrap").style.display = t.confirm ? "" : "none";
+  $("gateErr").textContent = "";
+  $("gateFoot").style.display = mode === "change" && authState.logged_in ? "" : "none";
+  $("gateLogout").textContent = "取消";
+  $("gate").classList.add("open");
+  setTimeout(() => $("gateUser").focus(), 60);
+}
+
+$("gateForm").onsubmit = async (e) => {
+  e.preventDefault();
+  const username = $("gateUser").value.trim();
+  const password = $("gatePass").value;
+  if (gateMode !== "login" && password !== $("gatePass2").value) {
+    $("gateErr").textContent = "两次输入的密码不一致";
+    return;
+  }
+  const url = gateMode === "login" ? "/api/login" : "/api/account";
+  $("gateSubmit").disabled = true;
+  try {
+    const resp = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ username, password }),
+    });
+    const data = await resp.json();
+    if (!resp.ok) throw new Error(data.error || "操作失败");
+    $("gatePass").value = "";
+    $("gatePass2").value = "";
+    $("gate").classList.remove("open");
+    await loadAuth();
+    toast(gateMode === "login" ? "已登录" : "账号已保存");
+  } catch (err) {
+    $("gateErr").textContent = err.message || String(err);
+  } finally {
+    $("gateSubmit").disabled = false;
+  }
+};
+
+// 账号入口：修改用户名/密码
+$("accountBtn").onclick = () => {
+  $("gateUser").value = authState.username || "";
+  $("gatePass").value = "";
+  $("gatePass2").value = "";
+  showGate("change");
+};
+
+// 取消（仅修改账号时）/ 退出登录
+$("gateLogout").onclick = async (e) => {
+  e.preventDefault();
+  if (gateMode === "change") {
+    $("gate").classList.remove("open");
+    return;
+  }
+  await fetch("/api/logout", { method: "POST" });
+  await loadAuth();
+  toast("已退出登录");
+};
+
+// 数据库开关
+// 手机端折叠筛选面板，摘要里显示当前选中几个引擎
+function updateFiltersSummary() {
+  const total = engines.length;
+  const on = activeEngines.size;
+  $("filtersSummary").textContent = on === total ? "筛选（全部引擎）" : `筛选（${on}/${total} 引擎）`;
+}
+$("filtersToggle").onclick = () => {
+  const f = document.querySelector(".filters");
+  f.classList.toggle("open");
+  $("filtersToggle").lastElementChild.textContent = f.classList.contains("open") ? "▴" : "▾";
+  updateFiltersSummary();
+};
+
+$("dbEnabled").onchange = async () => {
+  await saveSettings($("dbEnabled").checked);
+  await loadAuth();
+};
+
+// 关闭详情（手机上抽屉铺满整屏，点遮罩点不到，必须有关闭按钮）
+$("dClose").onclick = closeDetail;
 
 /* ---------- 事件绑定 ---------- */
 $("go").onclick = () => search(1);
@@ -784,8 +1067,11 @@ document.addEventListener("keydown", (e) => {
   }
 });
 
-loadEngines();
-loadSettings();
+(async () => {
+  await loadAuth();
+  await loadEngines();
+  await loadSettings();
+})();
 </script>
 </body>
 </html>
