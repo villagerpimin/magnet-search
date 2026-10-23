@@ -25,11 +25,30 @@ go build -o msearch ./cmd/msearch
 ./msearch engines                  # 列出全部引擎
 ```
 
+## 配置文件
+
+服务启动**只读配置文件**，不再接受命令行开关。默认读当前目录的 `config.yaml`：
+
+```bash
+cp config.example.yaml config.yaml   # 按注释改一遍
+msearch serve                        # 读 ./config.yaml
+msearch serve --config /path/to/config.yaml
+```
+
+`config.yaml` 含数据库与登录口令，已被 `.gitignore` 忽略，不会进仓库。
+只写想改的项即可，其余沿用默认值；写错（比如 `dead_filter` 拼错、`timeout` 不是 `15s` 这种时长）
+启动时会直接报错指出来，不会带着错配置跑起来。
+
+覆盖的配置项：监听地址、代理与作用范围、按引擎代理、超时与重试、检索默认值
+（引擎、每页条数、死链策略、最少对等端、冷门席位、每簇条数、探测开关等）、数据库、登录账号。
+
+> 检索与自检子命令仍可用命令行参数临时调（`--engine`、`--limit` 等），
+> 也可以加 `--config` 让它们先取配置文件里的网络与检索默认值。
+
 ## Web 界面
 
 ```bash
-./msearch serve                       # 默认 http://127.0.0.1:8080
-./msearch serve --addr 127.0.0.1:9000 --proxy http://127.0.0.1:7890
+msearch serve                        # 读 ./config.yaml，按里面的 addr 监听
 ```
 
 浏览器打开后即可使用：顶部搜索框，右侧引擎状态点（点击"检测"逐个探测可达性），
@@ -45,7 +64,7 @@ go build -o msearch ./cmd/msearch
 
 翻页走普通接口，服务端有 5 分钟的结果缓存，翻页是秒回。
 
-**代理**：服务启动时带的 `--proxy` 会**自动填进界面的代理框**，开箱即用；
+**代理**：配置文件里的 `proxy` 会**自动填进界面的代理框**，开箱即用；
 界面上可随时改（留空 = 不用代理），并选择作用范围——「仅境外引擎」或「全部引擎」，
 点「应用」保存到服务端。也可以用命令行 `--proxy-engine bt4g=http://...` 单独指定某个引擎。
 
@@ -91,7 +110,7 @@ go build -o msearch ./cmd/msearch
 搜索接口另外支持 `per_page`（每页条数，默认 20）与 `page`（页码，从 1 开始），
 返回体含 `total`、`page`、`per_page`、`total_pages`、`pool_size`。
 
-> 服务默认只监听回环地址。用 `--addr 0.0.0.0:8080` 对外开放时，服务本身没有鉴权，
+> 服务默认只监听回环地址。把配置里的 `addr` 改成 `0.0.0.0:8080` 对外开放时，服务本身没有鉴权，
 > 请自行放在反向代理与访问控制之后。
 
 ## 手机端
@@ -161,20 +180,20 @@ Windows 上使用时的两点注意：
 默认不连数据库，检索不需要登录。配置 MySQL 后会**记录每次检索**（关键词、时间、来源 IP、
 参与引擎、结果条数、耗时），并**要求登录后才能真正检索**。
 
-```bash
-# 首次启动：建账号 + 启用记录
-msearch serve --addr 127.0.0.1:9244 \
-  --db-dsn 'root:你的密码@tcp(127.0.0.1:3306)/msearch?parseTime=true&charset=utf8mb4&loc=Local' \
-  --username admin --password '你的登录密码'
+在 `config.yaml` 里配置：
 
-# 之后可以不带账号参数启动，账号已存在库里
-msearch serve --addr 127.0.0.1:9244 --db-dsn '...'
+```yaml
+database:
+  enabled: true
+  dsn: "root:你的密码@tcp(127.0.0.1:3306)/msearch?parseTime=true&charset=utf8mb4&loc=Local"
 
-# 不想记录、也不想登录：去掉 --db-dsn，或显式关闭
-msearch serve --addr 127.0.0.1:9244 --db-dsn '...' --db off
+# 可选：想让服务启动时直接建好账号就填这两项，之后建议清空
+account:
+  username: admin
+  password: "你的登录密码"
 ```
 
-口令不必写进命令历史，可以用环境变量：`MSEARCH_DB_DSN`、`MSEARCH_PASSWORD`。
+不想记录、也不想登录：把 `database.enabled` 改成 `false`（或删掉整段）即可。
 
 **行为约定**
 
