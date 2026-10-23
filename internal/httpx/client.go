@@ -82,16 +82,17 @@ func New(opts Options) (*Client, error) {
 }
 
 // normalizeProxies 去重并过滤非法代理地址。
+// 空字符串代表"直连"，必须保留：调用方用 ["代理", ""] 表达
+// "先试代理、失败再直连"，过滤掉空串会让直连兜底失效。
 func normalizeProxies(list []string) []string {
 	var out []string
 	seen := make(map[string]bool)
 	for _, p := range list {
 		p = strings.TrimSpace(p)
-		if p == "" {
-			continue
-		}
-		if _, err := url.Parse(p); err != nil {
-			continue
+		if p != "" {
+			if _, err := url.Parse(p); err != nil {
+				continue
+			}
 		}
 		if seen[p] {
 			continue
@@ -262,9 +263,21 @@ func (c *Client) SetMinGap(d time.Duration) {
 	c.mu.Unlock()
 }
 
-// HasProxy 判断是否配置了可用代理。
+// HasProxy 判断是否配置了真正的代理（直连不计）。
 func (c *Client) HasProxy() bool {
-	return len(c.proxies) > 0
+	for _, p := range c.proxies {
+		if p != "" {
+			return true
+		}
+	}
+	return false
+}
+
+// ProxyChain 返回实际生效的代理链，便于排查"为什么没走代理"。
+func (c *Client) ProxyChain() []string {
+	out := make([]string, len(c.proxies))
+	copy(out, c.proxies)
+	return out
 }
 
 // RedactProxy 去掉代理地址中的凭据，用于日志输出。
