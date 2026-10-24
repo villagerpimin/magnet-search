@@ -32,15 +32,31 @@ func (r *Rutor) Name() string { return "rutor" }
 // Description 返回引擎描述。
 func (r *Rutor) Description() string { return "rutor.info 俄文资源搜索" }
 
-// Search 执行搜索。
+// Search 执行搜索，按需翻页直到满足 Limit。
 func (r *Rutor) Search(ctx context.Context, opts Options) ([]model.Result, error) {
-	body, err := r.Client.Get(ctx, r.searchURL(opts))
-	if err != nil {
-		return nil, fmt.Errorf("rutor 请求失败: %w", err)
-	}
-	results, err := r.parse(body)
-	if err != nil {
-		return nil, err
+	results := make([]model.Result, 0, rutorPageSize)
+	for page := 0; page < rutorPageCount(opts.Limit); page++ {
+		body, err := r.Client.Get(ctx, r.searchURL(opts, page))
+		if err != nil {
+			if page == 0 {
+				return nil, fmt.Errorf("rutor 请求失败: %w", err)
+			}
+			break
+		}
+		pageResults, err := r.parse(body)
+		if err != nil {
+			if page == 0 {
+				return nil, err
+			}
+			break
+		}
+		for i := range pageResults {
+			pageResults[i].Rank = len(results) + i
+		}
+		results = append(results, pageResults...)
+		if len(pageResults) == 0 || (opts.Limit > 0 && len(results) >= opts.Limit) {
+			break
+		}
 	}
 	return limitResults(results, opts.Limit), nil
 }
@@ -58,18 +74,38 @@ func RegisterRutor(reg *Registry) {
 // searchURL 拼装查询地址。
 //
 // 站点真实的路由是 /search/{页码}/{分类}/{检索方式}{检索范围}0/{排序}/{关键词}，
-// 页面里的 search_submit 脚本就按这个格式跳转；本页固定取第 0 页、任意分类、
+// 页面里的 search_submit 脚本就按这个格式跳转；页码从 0 开始、任意分类、
 // “所有词”（检索方式 1）、只搜标题（检索范围 0）、按添加时间排序。
 //
 // 注意：/search/word/{关键词} 这种写法会被站点当成别的参数，
 // 实际搜索的是字面量 “word”，对任何关键词都返回同一批结果，因此这里不用它。
-func (r *Rutor) searchURL(opts Options) string {
+func (r *Rutor) searchURL(opts Options, page int) string {
 	// 站点把关键词里的 & 当成逻辑与运算符
 	query := strings.ReplaceAll(opts.Query, "&", "AND")
-	return fmt.Sprintf("%s/search/0/0/100/0/%s",
+	return fmt.Sprintf("%s/search/%d/0/100/0/%s",
 		strings.TrimRight(r.BaseURL, "/"),
+		page,
 		url.PathEscape(query),
 	)
+}
+
+const (
+	// rutorPageSize 是站点搜索结果每页的条目数。
+	rutorPageSize = 100
+	// rutorMaxPages 是最多翻取的页数。
+	rutorMaxPages = 3
+)
+
+// rutorPageCount 根据 Limit 决定要翻多少页，页码从 0 开始。
+func rutorPageCount(limit int) int {
+	if limit <= 0 {
+		return rutorMaxPages
+	}
+	pages := (limit + rutorPageSize - 1) / rutorPageSize
+	if pages > rutorMaxPages {
+		pages = rutorMaxPages
+	}
+	return pages
 }
 
 // rutor 列表里的大小与日期匹配规则。

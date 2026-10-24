@@ -152,6 +152,12 @@ func TestYtsSearchURL(t *testing.T) {
 			limit: 1,
 			want:  "https://yts.rs/api/v2/list_movies.json?query_term=the+matrix&limit=1",
 		},
+		{
+			name:  "超过接口上限时截断",
+			query: "matrix",
+			limit: 300,
+			want:  "https://yts.rs/api/v2/list_movies.json?query_term=matrix&limit=50",
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

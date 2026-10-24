@@ -62,8 +62,12 @@ func RegisterYts(reg *Registry) {
 	})
 }
 
-// ytsDefaultLimit 是接口默认拉取的电影数量。
-const ytsDefaultLimit = 20
+const (
+	// ytsDefaultLimit 是接口默认拉取的电影数量。
+	ytsDefaultLimit = 20
+	// ytsMaxAPILimit 是接口允许的单次电影数量上限。
+	ytsMaxAPILimit = 50
+)
 
 // ytsMirrors 是主域名不可用时的备用域名。
 // 官方品牌已迁到 yts.gg，yts.mx 在部分网络下不可达，因此把三者都列为候选。
@@ -91,6 +95,9 @@ func (a *Yts) searchURL(base string, opts Options) string {
 	limit := opts.Limit
 	if limit <= 0 {
 		limit = ytsDefaultLimit
+	}
+	if limit > ytsMaxAPILimit {
+		limit = ytsMaxAPILimit
 	}
 	return fmt.Sprintf("%s/api/v2/list_movies.json?query_term=%s&limit=%d",
 		strings.TrimRight(base, "/"),

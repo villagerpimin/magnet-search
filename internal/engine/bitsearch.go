@@ -76,7 +76,7 @@ const (
 	// bitsearchPageSize 是搜索结果每页的条目数。
 	bitsearchPageSize = 20
 	// bitsearchMaxPages 是最多翻取的页数，避免无上限翻页。
-	bitsearchMaxPages = 5
+	bitsearchMaxPages = 8
 )
 
 // searchURL 拼装某一页的查询地址。

@@ -144,19 +144,40 @@ func TestRutorSearchURL(t *testing.T) {
 	cases := []struct {
 		name  string
 		query string
+		page  int
 		want  string
 	}{
-		{"单词", "ubuntu", "https://rutor.info/search/0/0/100/0/ubuntu"},
-		{"多词", "ubuntu linux", "https://rutor.info/search/0/0/100/0/ubuntu%20linux"},
-		{"和号按站点规则换成 AND", "rock & roll", "https://rutor.info/search/0/0/100/0/rock%20AND%20roll"},
+		{"单词", "ubuntu", 0, "https://rutor.info/search/0/0/100/0/ubuntu"},
+		{"第二页", "ubuntu", 1, "https://rutor.info/search/1/0/100/0/ubuntu"},
+		{"多词", "ubuntu linux", 0, "https://rutor.info/search/0/0/100/0/ubuntu%20linux"},
+		{"和号按站点规则换成 AND", "rock & roll", 0, "https://rutor.info/search/0/0/100/0/rock%20AND%20roll"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got := rutor.searchURL(Options{Query: tc.query})
+			got := rutor.searchURL(Options{Query: tc.query}, tc.page)
 			if got != tc.want {
 				t.Errorf("查询地址 = %q，期望 %q", got, tc.want)
 			}
 		})
+	}
+}
+
+// TestRutorPageCount 校验翻页数量按 Limit 计算且不超过上限。
+func TestRutorPageCount(t *testing.T) {
+	cases := []struct {
+		limit int
+		want  int
+	}{
+		{0, rutorMaxPages},
+		{1, 1},
+		{rutorPageSize, 1},
+		{rutorPageSize + 1, 2},
+		{1000, rutorMaxPages},
+	}
+	for _, c := range cases {
+		if got := rutorPageCount(c.limit); got != c.want {
+			t.Errorf("rutorPageCount(%d) = %d，期望 %d", c.limit, got, c.want)
+		}
 	}
 }
 

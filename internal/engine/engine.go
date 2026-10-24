@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/pigzhu/magnet-search/internal/magnet"
 	"github.com/pigzhu/magnet-search/internal/model"
 )
 
@@ -206,4 +207,161 @@ func SearchStream(ctx context.Context, engines []Engine, opts Options, onEngine 
 	wg.Wait()
 
 	return SearchResult{Results: results, Failures: failures, PerEngine: perEngine}
+}
+
+// variantOutcome 是某个查询变体在单个引擎上的返回。
+type variantOutcome struct {
+	// results 该变体返回的结果
+	results []model.Result
+	// err 该变体失败的原因
+	err error
+}
+
+// SearchVariants 与 SearchStream 类似，但每个引擎会并发执行多个查询变体，
+// 合并去重后只回调一次。
+// 同一引擎的多个变体共用一份超时预算，因此引擎总耗时仍然有界；
+// 只要有一个变体成功，引擎就算成功，失败的变体被忽略。
+func SearchVariants(ctx context.Context, engines []Engine, opts Options, queries []string, onEngine EngineCallback) SearchResult {
+	variants := normalizeVariants(queries, opts.Query)
+	if len(variants) == 0 {
+		return SearchResult{PerEngine: make(map[string]int)}
+	}
+	if len(variants) == 1 {
+		opts.Query = variants[0]
+		return SearchStream(ctx, engines, opts, onEngine)
+	}
+
+	timeout := opts.Timeout
+	if timeout <= 0 {
+		timeout = defaultEngineTimeout
+	}
+	var (
+		mu        sync.Mutex
+		results   []model.Result
+		failures  []Failure
+		perEngine = make(map[string]int)
+		wg        sync.WaitGroup
+	)
+
+	// 多个变体共享同一份结果上限，避免每个变体都按完整上限翻页导致请求量成倍增长。
+	variantLimit := opts.Limit
+	if n := len(variants); n > 1 && opts.Limit > 0 {
+		variantLimit = (opts.Limit + n - 1) / n
+	}
+
+	for _, e := range engines {
+		wg.Add(1)
+		go func(e Engine) {
+			defer wg.Done()
+			engineCtx, cancel := context.WithTimeout(ctx, timeout)
+			defer cancel()
+
+			outcomes := make([]variantOutcome, len(variants))
+			var inner sync.WaitGroup
+			for i, query := range variants {
+				inner.Add(1)
+				go func(i int, query string) {
+					defer inner.Done()
+					variantOpts := opts
+					variantOpts.Query = query
+					variantOpts.Limit = variantLimit
+					res, err := e.Search(engineCtx, variantOpts)
+					outcomes[i] = variantOutcome{results: res, err: err}
+				}(i, query)
+			}
+			inner.Wait()
+
+			combined, firstErr, success := mergeVariants(outcomes, opts.Limit)
+
+			mu.Lock()
+			defer mu.Unlock()
+			if !success {
+				failures = append(failures, Failure{Engine: e.Name(), Err: firstErr})
+				if onEngine != nil {
+					onEngine(e.Name(), nil, firstErr)
+				}
+				return
+			}
+			results = append(results, combined...)
+			perEngine[e.Name()] = len(combined)
+			if onEngine != nil {
+				onEngine(e.Name(), combined, nil)
+			}
+		}(e)
+	}
+	wg.Wait()
+
+	return SearchResult{Results: results, Failures: failures, PerEngine: perEngine}
+}
+
+// normalizeVariants 清理查询变体：去掉首尾空白、丢弃空串，并按大小写不敏感去重。
+// 全部为空时回退到 fallback。
+func normalizeVariants(queries []string, fallback string) []string {
+	seen := make(map[string]bool)
+	var out []string
+	add := func(query string) {
+		query = strings.TrimSpace(query)
+		if query == "" {
+			return
+		}
+		key := strings.ToLower(query)
+		if seen[key] {
+			return
+		}
+		seen[key] = true
+		out = append(out, query)
+	}
+	for _, query := range queries {
+		add(query)
+	}
+	if len(out) == 0 {
+		add(fallback)
+	}
+	return out
+}
+
+// mergeVariants 合并各变体的结果：按归一化 info hash 去重，
+// 同一资源保留引擎位置最好（Rank 最小）的一条；无效哈希原样保留、不参与去重。
+// 合并后按 Rank 升序稳定排序，并在 limit > 0 时截断。
+func mergeVariants(outcomes []variantOutcome, limit int) ([]model.Result, error, bool) {
+	var combined []model.Result
+	index := make(map[string]int)
+	var firstErr error
+	success := false
+
+	for _, outcome := range outcomes {
+		if outcome.err != nil {
+			if firstErr == nil {
+				firstErr = outcome.err
+			}
+			continue
+		}
+		success = true
+		for _, result := range outcome.results {
+			hash, valid := magnet.NormalizeInfoHash(result.InfoHash)
+			if !valid {
+				combined = append(combined, result)
+				continue
+			}
+			if pos, exists := index[hash]; exists {
+				if result.Rank < combined[pos].Rank {
+					combined[pos] = result
+				}
+				continue
+			}
+			index[hash] = len(combined)
+			combined = append(combined, result)
+		}
+	}
+
+	sort.SliceStable(combined, func(i, j int) bool {
+		return combined[i].Rank < combined[j].Rank
+	})
+	if limit > 0 && len(combined) > limit {
+		combined = combined[:limit]
+	}
+	if !success && firstErr == nil {
+		firstErr = fmt.Errorf("所有查询变体均失败")
+	}
+	return combined, firstErr, success
 }

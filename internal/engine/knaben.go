@@ -39,12 +39,7 @@ func (a *Knaben) Description() string { return "knaben.org 磁力搜索（带最
 func (a *Knaben) Search(ctx context.Context, opts Options) ([]model.Result, error) {
 	var lastErr error
 	for _, base := range a.bases() {
-		body, err := fetchWithRetry(ctx, a.Client, a.searchURL(base, opts))
-		if err != nil {
-			lastErr = fmt.Errorf("%s: %w", base, err)
-			continue
-		}
-		results, err := a.parse(body)
+		results, err := a.searchPages(ctx, base, opts)
 		if err != nil {
 			lastErr = fmt.Errorf("%s: %w", base, err)
 			continue
@@ -52,6 +47,36 @@ func (a *Knaben) Search(ctx context.Context, opts Options) ([]model.Result, erro
 		return limitResults(results, opts.Limit), nil
 	}
 	return nil, fmt.Errorf("knaben 请求失败: %w", lastErr)
+}
+
+// searchPages 按需翻页，直到取够 Limit 条或站点没有下一页。
+// 第一页失败才算引擎失败；后续页失败时保留已经拿到的结果。
+func (a *Knaben) searchPages(ctx context.Context, base string, opts Options) ([]model.Result, error) {
+	results := make([]model.Result, 0, knabenPageSize)
+	for page := 1; page <= knabenPageCount(opts.Limit); page++ {
+		body, err := fetchWithRetry(ctx, a.Client, a.searchURL(base, opts, page))
+		if err != nil {
+			if page == 1 {
+				return nil, err
+			}
+			break
+		}
+		pageResults, err := a.parse(body)
+		if err != nil {
+			if page == 1 {
+				return nil, err
+			}
+			break
+		}
+		for i := range pageResults {
+			pageResults[i].Rank = len(results) + i
+		}
+		results = append(results, pageResults...)
+		if len(pageResults) == 0 || (opts.Limit > 0 && len(results) >= opts.Limit) {
+			break
+		}
+	}
+	return results, nil
 }
 
 // RegisterKnaben 把 knaben 注册到引擎表。
@@ -81,11 +106,30 @@ func (a *Knaben) bases() []string {
 // 站点路径形如 /search/{关键词}/{分类}/{页码}/{排序}：
 // 分类 0 表示全部分类，页码从 1 开始，排序用 seeders 表示按做种数从多到少。
 // hideXXX 参数用来屏蔽成人内容，聚合层默认不展示这类资源。
-func (a *Knaben) searchURL(base string, opts Options) string {
-	return fmt.Sprintf("%s/search/%s/0/1/seeders?hideXXX",
+func (a *Knaben) searchURL(base string, opts Options, page int) string {
+	return fmt.Sprintf("%s/search/%s/0/%d/seeders?hideXXX",
 		strings.TrimRight(base, "/"),
 		url.PathEscape(opts.Query),
+		page,
 	)
+}
+
+// knabenPageSize 是站点搜索结果每页的条目数。
+const knabenPageSize = 50
+
+// knabenMaxPages 是最多翻取的页数，避免为了凑结果无限打站点。
+const knabenMaxPages = 5
+
+// knabenPageCount 根据 Limit 决定要翻多少页。
+func knabenPageCount(limit int) int {
+	if limit <= 0 {
+		return knabenMaxPages
+	}
+	pages := (limit + knabenPageSize - 1) / knabenPageSize
+	if pages > knabenMaxPages {
+		pages = knabenMaxPages
+	}
+	return pages
 }
 
 // parse 解析搜索结果页并归一化为结果列表。

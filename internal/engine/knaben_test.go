@@ -276,34 +276,64 @@ func TestKnabenSearchURL(t *testing.T) {
 		name  string
 		base  string
 		query string
+		page  int
 		want  string
 	}{
 		{
 			name:  "默认地址",
 			base:  "https://knaben.org",
 			query: "ubuntu",
+			page:  1,
 			want:  "https://knaben.org/search/ubuntu/0/1/seeders?hideXXX",
+		},
+		{
+			name:  "第二页",
+			base:  "https://knaben.org",
+			query: "ubuntu",
+			page:  2,
+			want:  "https://knaben.org/search/ubuntu/0/2/seeders?hideXXX",
 		},
 		{
 			name:  "关键词里的空格要转义",
 			base:  "https://knaben.org",
 			query: "hello world",
+			page:  1,
 			want:  "https://knaben.org/search/hello%20world/0/1/seeders?hideXXX",
 		},
 		{
 			name:  "结尾斜杠不重复",
 			base:  "https://knaben.org/",
 			query: "ubuntu",
+			page:  1,
 			want:  "https://knaben.org/search/ubuntu/0/1/seeders?hideXXX",
 		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got := knaben.searchURL(tc.base, Options{Query: tc.query})
+			got := knaben.searchURL(tc.base, Options{Query: tc.query}, tc.page)
 			if got != tc.want {
 				t.Errorf("查询地址 = %q，期望 %q", got, tc.want)
 			}
 		})
+	}
+}
+
+// TestKnabenPageCount 校验翻页数量按 Limit 计算且不超过上限。
+func TestKnabenPageCount(t *testing.T) {
+	cases := []struct {
+		limit int
+		want  int
+	}{
+		{0, knabenMaxPages},
+		{1, 1},
+		{knabenPageSize, 1},
+		{knabenPageSize + 1, 2},
+		{1000, knabenMaxPages},
+	}
+	for _, c := range cases {
+		if got := knabenPageCount(c.limit); got != c.want {
+			t.Errorf("knabenPageCount(%d) = %d，期望 %d", c.limit, got, c.want)
+		}
 	}
 }
 
