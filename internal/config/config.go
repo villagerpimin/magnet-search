@@ -17,8 +17,22 @@ import (
 type Database struct {
 	// Enabled 是否启用数据库（关闭时不记录检索、也不需要登录）
 	Enabled bool `yaml:"enabled"`
-	// DSN MySQL 连接串
+	// DSN MySQL 连接串，兼容旧配置；填写后优先于拆分字段
 	DSN string `yaml:"dsn"`
+	// Host MySQL 主机地址
+	Host string `yaml:"host"`
+	// Port MySQL 端口，0 表示使用默认端口 3306
+	Port int `yaml:"port"`
+	// Username MySQL 登录用户名
+	Username string `yaml:"username"`
+	// Password MySQL 登录密码
+	Password string `yaml:"password"`
+	// Name MySQL 数据库名
+	Name string `yaml:"database"`
+	// RequireLogin 是否要求登录后才能检索（存在账号时生效）
+	RequireLogin bool `yaml:"require_login"`
+	// AllowRegister 是否允许自助注册账号
+	AllowRegister bool `yaml:"allow_register"`
 }
 
 // Account 是登录账号配置。
@@ -71,6 +85,10 @@ type Config struct {
 	Probe bool `yaml:"probe"`
 	// Category 分类过滤
 	Category string `yaml:"category"`
+	// SplitQuery 是否把查询拆成独立关键词分别检索
+	SplitQuery bool `yaml:"split_query"`
+	// MaxQueryTerms 拆词检索最多使用几个关键词，0 表示默认值
+	MaxQueryTerms int `yaml:"max_query_terms"`
 
 	// Database 数据库配置
 	Database Database `yaml:"database"`
@@ -117,6 +135,13 @@ func defaults() *Config {
 		PerCluster:     app.DefaultPerCluster,
 		ClusterKey:     "resolution",
 		Probe:          true,
+		SplitQuery:     true,
+		MaxQueryTerms:  app.DefaultMaxQueryTerms,
+		Database: Database{
+			Port:          3306,
+			RequireLogin:  true,
+			AllowRegister: false,
+		},
 	}
 }
 
@@ -177,8 +202,19 @@ func (c *Config) validate() error {
 	if c.PerCluster < 0 {
 		return fmt.Errorf("per_cluster 不能为负数")
 	}
+	if c.MaxQueryTerms < 0 || c.MaxQueryTerms > 10 {
+		return fmt.Errorf("max_query_terms 必须在 0 到 10 之间，0 表示使用默认值")
+	}
+	if c.Database.Port < 0 || c.Database.Port > 65535 {
+		return fmt.Errorf("database.port 必须在 0 到 65535 之间，0 表示使用默认端口 3306")
+	}
 	if c.Database.Enabled && strings.TrimSpace(c.Database.DSN) == "" {
-		return fmt.Errorf("database.enabled 为 true 时必须填写 database.dsn")
+		if strings.TrimSpace(c.Database.Host) == "" {
+			return fmt.Errorf("database.enabled 为 true 时必须填写 database.host（或改用 database.dsn）")
+		}
+		if strings.TrimSpace(c.Database.Name) == "" {
+			return fmt.Errorf("database.enabled 为 true 时必须填写 database.database（或改用 database.dsn）")
+		}
 	}
 	if (c.Account.Username == "") != (c.Account.Password == "") {
 		return fmt.Errorf("account.username 与 account.password 需要同时填写")
@@ -204,6 +240,8 @@ func (c *Config) Options() app.Options {
 		PerCluster:     c.PerCluster,
 		ClusterKey:     c.ClusterKey,
 		Probe:          c.Probe,
+		SplitQuery:     c.SplitQuery,
+		MaxQueryTerms:  c.MaxQueryTerms,
 		Proxy:          c.Proxy,
 		ProxyScope:     c.ProxyScope,
 		ProxyEngine:    c.ProxyEngines,
@@ -214,8 +252,15 @@ func (c *Config) Options() app.Options {
 }
 
 // DatabaseEnabled 返回是否应该连接数据库。
+// 拆分字段与旧版 DSN 都支持：填写 DSN 时以 DSN 为准。
 func (c *Config) DatabaseEnabled() bool {
-	return c.Database.Enabled && strings.TrimSpace(c.Database.DSN) != ""
+	if !c.Database.Enabled {
+		return false
+	}
+	if strings.TrimSpace(c.Database.DSN) != "" {
+		return true
+	}
+	return strings.TrimSpace(c.Database.Host) != "" && strings.TrimSpace(c.Database.Name) != ""
 }
 
 // HasAccountSetup 返回是否需要在启动时创建/更新账号。

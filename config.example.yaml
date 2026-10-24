@@ -47,6 +47,14 @@ limit: 20
 # 每个引擎默认取回多少条。
 per_engine_limit: 50
 
+# 拆词检索：把查询拆成"完整查询 + 各个独立关键词"分别交给引擎检索，
+# 合并去重后，命中关键词更多的结果排名更靠前；只命中部分关键词的结果也会保留，
+# 但数字/版本号等锚点仍然必须匹配。关闭后只按完整查询检索。
+split_query: true
+
+# 拆词检索最多使用几个独立关键词（0 表示使用默认值 4）。
+max_query_terms: 4
+
 # 死链处理策略：
 #   hide   = 隐藏被判死的（默认）
 #   mark   = 显示但打上死链标签
@@ -86,12 +94,23 @@ category: ""
 # ---------------------------------------------------------------- 数据库
 # 关闭时：不记录检索、不需要登录。
 # 开启时：记录每次检索（关键词、时间、来源 IP、引擎、结果条数、耗时），
-#         并要求登录后才能检索。
+#         并按下面的开关决定是否要求登录、是否开放注册。
 
 database:
   enabled: false
-  # MySQL 连接串。密码含有 @ : / 等字符时要按 URL 规则转义。
-  dsn: "root:yourpassword@tcp(127.0.0.1:3306)/msearch?parseTime=true&charset=utf8mb4&loc=Local"
+  # MySQL 连接信息。密码含 @ : / 等字符时按普通字符串写即可，无需转义。
+  host: "127.0.0.1"
+  port: 3306
+  username: root
+  password: "yourpassword"
+  database: msearch
+  # 旧版兼容项：完整的 MySQL 连接串。填写后优先于上面的拆分字段；
+  # 新配置建议使用拆分字段，仅在迁移旧配置时保留 dsn。
+  # dsn: "root:yourpassword@tcp(127.0.0.1:3306)/msearch?parseTime=true&charset=utf8mb4&loc=Local"
+  # 存在账号时，是否要求登录后才能检索（默认 true）。
+  require_login: true
+  # 是否允许自助注册账号（默认 false）。
+  allow_register: false
 
 # 登录账号。用户名与密码都填时，启动会创建或更新账号；
 # 之后可以都留空（账号已存在库里）。

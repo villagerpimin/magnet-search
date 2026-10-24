@@ -39,8 +39,26 @@ func TestLoadDefaults(t *testing.T) {
 	if !cfg.Probe {
 		t.Error("probe 默认应开启")
 	}
-	if cfg.DatabaseEnabled() {
+	if !cfg.SplitQuery {
+		t.Error("split_query 默认应开启")
+	}
+	if cfg.MaxQueryTerms != 4 {
+		t.Errorf("max_query_terms 默认应为 4，实际 %d", cfg.MaxQueryTerms)
+	}
+	if cfg.Database.Enabled {
 		t.Error("数据库默认应关闭")
+	}
+	if cfg.Database.Port != 3306 {
+		t.Errorf("database.port 默认应为 3306，实际 %d", cfg.Database.Port)
+	}
+	if !cfg.Database.RequireLogin {
+		t.Error("database.require_login 默认应为 true")
+	}
+	if cfg.Database.AllowRegister {
+		t.Error("database.allow_register 默认应为 false")
+	}
+	if cfg.DatabaseEnabled() {
+		t.Error("数据库默认应视为未启用")
 	}
 }
 
@@ -66,9 +84,17 @@ rare_quota: 0
 per_cluster: 3
 cluster_key: full
 probe: false
+split_query: false
+max_query_terms: 6
 database:
   enabled: true
-  dsn: "root:pw@tcp(127.0.0.1:3306)/msearch"
+  host: "127.0.0.1"
+  port: 3307
+  username: root
+  password: "pw:with@chars"
+  database: msearch
+  require_login: false
+  allow_register: true
 account:
   username: admin
   password: secret123
@@ -92,8 +118,22 @@ account:
 	if cfg.Probe {
 		t.Error("probe 应被关闭")
 	}
+	if cfg.SplitQuery || cfg.MaxQueryTerms != 6 {
+		t.Errorf("拆词配置未覆盖: split=%v max=%d", cfg.SplitQuery, cfg.MaxQueryTerms)
+	}
 	if !cfg.DatabaseEnabled() || !cfg.HasAccountSetup() {
 		t.Error("数据库与账号应视为已配置")
+	}
+	if cfg.Database.Host != "127.0.0.1" || cfg.Database.Port != 3307 ||
+		cfg.Database.Username != "root" || cfg.Database.Password != "pw:with@chars" ||
+		cfg.Database.Name != "msearch" {
+		t.Errorf("database 拆分字段解析不对: %+v", cfg.Database)
+	}
+	if cfg.Database.RequireLogin {
+		t.Error("require_login 应被覆盖为 false")
+	}
+	if !cfg.Database.AllowRegister {
+		t.Error("allow_register 应被覆盖为 true")
 	}
 
 	opts := cfg.Options()
@@ -102,6 +142,28 @@ account:
 	}
 	if len(opts.Engines) != 2 || opts.Timeout != 20*time.Second {
 		t.Errorf("Options 映射不对: %+v", opts)
+	}
+	if opts.SplitQuery || opts.MaxQueryTerms != 6 {
+		t.Errorf("拆词参数映射不对: %+v", opts)
+	}
+}
+
+// TestLoadLegacyDSN 校验旧版 dsn 仍然可用。
+func TestLoadLegacyDSN(t *testing.T) {
+	path := writeTemp(t, `
+database:
+  enabled: true
+  dsn: "root:pw@tcp(127.0.0.1:3306)/msearch?parseTime=true"
+`)
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("旧版 dsn 应能加载: %v", err)
+	}
+	if !cfg.DatabaseEnabled() {
+		t.Error("只填 dsn 时数据库应视为启用")
+	}
+	if cfg.Database.Port != 3306 || !cfg.Database.RequireLogin || cfg.Database.AllowRegister {
+		t.Errorf("旧版配置的默认值不对: %+v", cfg.Database)
 	}
 }
 
@@ -115,7 +177,13 @@ func TestLoadValidation(t *testing.T) {
 		{"代理范围非法", "proxy_scope: sometimes\n"},
 		{"聚类粒度非法", "cluster_key: nope\n"},
 		{"时长格式非法", "timeout: 15\n"},
-		{"开启数据库却没填 dsn", "database:\n  enabled: true\n"},
+		{"开启数据库却没填任何连接信息", "database:\n  enabled: true\n"},
+		{"开启数据库却没填 host", "database:\n  enabled: true\n  database: msearch\n"},
+		{"开启数据库却没填 database", "database:\n  enabled: true\n  host: 127.0.0.1\n"},
+		{"端口越界", "database:\n  port: 70000\n"},
+		{"拆词数量为负", "max_query_terms: -1\n"},
+		{"拆词数量过大", "max_query_terms: 11\n"},
+		{"端口为负", "database:\n  port: -1\n"},
 		{"账号只填一半", "account:\n  username: admin\n"},
 		{"密码太短", "account:\n  username: admin\n  password: 123\n"},
 	}
