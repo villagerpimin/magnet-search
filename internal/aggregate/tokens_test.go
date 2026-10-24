@@ -199,3 +199,41 @@ func TestQueryFilters(t *testing.T) {
 func hasSubstring(s, sub string) bool {
 	return len(sub) > 0 && strings.Contains(s, sub)
 }
+
+// TestComputeRelevanceAllowsPartialSplitTerms 校验拆词检索的放宽规则：
+// 只命中部分关键词的结果可以通过硬门，且命中越多得分越高；
+// 数字/版本锚点缺失或完全无命中时仍然淘汰。
+func TestComputeRelevanceAllowsPartialSplitTerms(t *testing.T) {
+	both := ComputeRelevance(RelevanceInput{Query: "deepseek harness", Title: "DeepSeek V3 Harness", Rank: 0})
+	nameOnly := ComputeRelevance(RelevanceInput{Query: "deepseek harness", Title: "DeepSeek V3 Release", Rank: 0})
+	harnessOnly := ComputeRelevance(RelevanceInput{Query: "deepseek harness", Title: "Harness Notes", Rank: 0})
+
+	if !nameOnly.Passed {
+		t.Errorf("只命中 deepseek 应通过，原因: %s", nameOnly.Reason)
+	}
+	if !harnessOnly.Passed {
+		t.Errorf("只命中 harness 应通过，原因: %s", harnessOnly.Reason)
+	}
+	if !both.Passed {
+		t.Errorf("两个关键词都命中应通过，原因: %s", both.Reason)
+	}
+	if both.Score <= nameOnly.Score {
+		t.Errorf("命中两个关键词的得分应更高: both=%v one=%v", both.Score, nameOnly.Score)
+	}
+	hyphenPartial := ComputeRelevance(RelevanceInput{Query: "deepseek-harness", Title: "Harness Notes", Rank: 0})
+	if !hyphenPartial.Passed {
+		t.Errorf("连字符查询只命中 harness 时应通过，原因: %s", hyphenPartial.Reason)
+	}
+
+	missingAnchor := ComputeRelevance(RelevanceInput{Query: "ubuntu 24.04", Title: "Ubuntu 22.04 LTS", Rank: 0})
+	if missingAnchor.Passed {
+		t.Errorf("24.04 锚点缺失时不应通过: %+v", missingAnchor)
+	}
+	noHit := ComputeRelevance(RelevanceInput{Query: "ubuntu", Title: "Windows 11", Rank: 0})
+	if noHit.Passed {
+		t.Errorf("完全无命中时不应通过: %+v", noHit)
+	}
+	if noHit.Reason != "没有任何查询词命中" {
+		t.Errorf("完全无命中的原因 = %q，期望 %q", noHit.Reason, "没有任何查询词命中")
+	}
+}

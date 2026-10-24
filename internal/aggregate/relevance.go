@@ -60,7 +60,7 @@ const (
 // 因此它在结果中的位置是独立于文本重叠的真实信号；
 // 中文查询检索日文/英文标题的海外资源时，主要靠这一项兜底。
 func ComputeRelevance(in RelevanceInput) RelevanceResult {
-	qTokens := classify(in.Query, false)
+	qTokens := classify(normalizeQuerySeparators(in.Query), false)
 	tTokens := classify(in.Title, false)
 
 	required, anchors := splitQueryTokens(qTokens)
@@ -78,13 +78,13 @@ func ComputeRelevance(in RelevanceInput) RelevanceResult {
 	}
 
 	// 锚点必须全部命中，避免"第 4 集的低码率版本"压过"第 3 集的正确版本"
-	for i, tok := range anchors {
-		if matches[i] <= 0 {
+	for _, idx := range anchors {
+		if matches[idx] <= 0 {
 			return RelevanceResult{
 				Coverage:    coverage,
 				EnginePrior: enginePrior(in.Rank),
 				Passed:      false,
-				Reason:      "锚点未命中: " + tok.Text,
+				Reason:      "锚点未命中: " + required[idx].Text,
 			}
 		}
 	}
@@ -111,11 +111,15 @@ func ComputeRelevance(in RelevanceInput) RelevanceResult {
 		Passed:      true,
 	}
 
+	// 拆词检索会分别用完整查询和单个关键词检索，因此只命中部分关键词的结果
+	// 也允许通过；但一个查询词都没命中时仍视为无关。
+	// 旧的"文本相关度过低且引擎排序靠后"兜底只在覆盖率接近完整时生效，
+	// 避免把只命中部分关键词、但确实相关的拆词结果误杀。
 	switch {
-	case coverage < relMinCoverage:
+	case len(required) > 0 && coverage <= 0:
 		res.Passed = false
-		res.Reason = "覆盖率不足"
-	case textRel < relMinTextRel && in.Rank > relMaxPoorRank:
+		res.Reason = "没有任何查询词命中"
+	case coverage >= relMinCoverage && textRel < relMinTextRel && in.Rank > relMaxPoorRank:
 		res.Passed = false
 		res.Reason = "文本相关度过低且引擎排序靠后"
 	}
@@ -139,7 +143,8 @@ func QueryFilters(query string) (quality, lang []string) {
 }
 
 // splitQueryTokens 把查询词元分成必需词元与锚点词元。
-func splitQueryTokens(tokens []Token) (required []Token, anchors []Token) {
+// anchors 返回锚点在 required 中的下标，便于按同一套匹配结果校验。
+func splitQueryTokens(tokens []Token) (required []Token, anchors []int) {
 	for _, tok := range tokens {
 		switch tok.Class {
 		case TokenName, TokenNum, TokenVer:
@@ -150,10 +155,10 @@ func splitQueryTokens(tokens []Token) (required []Token, anchors []Token) {
 		if stopWords[tok.Text] {
 			continue
 		}
-		required = append(required, tok)
 		if tok.Class == TokenNum || tok.Class == TokenVer {
-			anchors = append(anchors, tok)
+			anchors = append(anchors, len(required))
 		}
+		required = append(required, tok)
 	}
 	return required, anchors
 }
