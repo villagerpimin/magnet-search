@@ -37,35 +37,37 @@ jobs:
             goarch: amd64
             ext: ""
 
+    # 每个 run 步骤是独立 shell，跨步骤共享的变量必须放在 job 级 env
+    env:
+      GOOS: ${{ matrix.goos }}
+      GOARCH: ${{ matrix.goarch }}
+      CGO_ENABLED: "0"
+      BIN: msearch-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.ext }}
+
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-go@v5
         with:
-          go-version: "1.26"
+          go-version-file: go.mod
+          cache: true
 
       - name: 构建
-        env:
-          GOOS: ${{ matrix.goos }}
-          GOARCH: ${{ matrix.goarch }}
-          CGO_ENABLED: "0"
-        run: |
-          name="msearch-${GOOS}-${GOARCH}"
-          if [ "$GOOS" = "windows" ]; then name="msearch-${GOOS}-${GOARCH}.exe"; fi
-          go build -trimpath -ldflags "-s -w" -o "$name" ./cmd/msearch
+        run: go build -trimpath -ldflags "-s -w" -o "$BIN" ./cmd/msearch
 
+      # 交叉编译产物无法在 runner 上直接执行，改用 go version -m 校验目标平台
       - name: 自检
         run: |
-          if [ "$GOOS" = "windows" ]; then
-            file "$name"
-          else
-            "$name" version
-          fi
+          file "$BIN"
+          info="$(go version -m "$BIN")"
+          printf '%s\n' "$info"
+          grep -q "GOOS=${GOOS}" <<<"$info"
+          grep -q "GOARCH=${GOARCH}" <<<"$info"
 
       - uses: actions/upload-artifact@v4
         with:
           name: msearch-${{ matrix.goos }}-${{ matrix.goarch }}
-          path: ${{ format('msearch-{0}-{1}{2}', matrix.goos, matrix.goarch, matrix.ext) }}
+          path: ${{ env.BIN }}
           if-no-files-found: error
 
   attach:
