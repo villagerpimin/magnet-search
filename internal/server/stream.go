@@ -94,6 +94,13 @@ func (s *Server) handleSearchStream(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 3*time.Minute)
 	defer cancel()
 
+	// 同一组参数的检索结果已经缓存时直接返回，避免翻页或换每页条数时重跑网络检索
+	key := searchCacheKey(opts)
+	if out, ok := s.cache.get(key); ok {
+		sse.send("done", buildSearchResponse(out, perPage, page, time.Now()))
+		return
+	}
+
 	now := time.Now()
 	out, searchErr := app.SearchStream(ctx, opts, func(ev app.Event) {
 		switch ev.Kind {
@@ -115,39 +122,15 @@ func (s *Server) handleSearchStream(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// 客户端中途断开时结果可能不完整，不能写进缓存
+	if r.Context().Err() == nil {
+		s.cache.put(key, out)
+	}
+
 	// 全部引擎结束并完成存活探测后，给出最终的排序与分页信息
-	total := len(out.Results)
-	totalPages := (total + perPage - 1) / perPage
-	if totalPages < 1 {
-		totalPages = 1
-	}
-	if page > totalPages {
-		page = totalPages
-	}
-	start, end, page, totalPages := paginate(total, perPage, page)
-	final := searchResponse{
-		Query:          out.Query,
-		Count:          end - start,
-		Dropped:        out.Dropped,
-		ElapsedMS:      out.Elapsed.Milliseconds(),
-		ProbeAvailable: out.ProbeAvailable,
-		ProbeReason:    out.ProbeReason,
-		PerEngine:      out.PerEngine,
-		Results:        make([]searchResult, 0, end-start),
-		Total:          total,
-		Page:           page,
-		PerPage:        perPage,
-		TotalPages:     totalPages,
-		PoolSize:       poolSizeFor(perPage),
-	}
-	for _, f := range out.Failures {
-		final.Failures = append(final.Failures, map[string]string{"engine": f.Engine, "error": f.Err.Error()})
-	}
-	for _, c := range out.Results[start:end] {
-		final.Results = append(final.Results, newSearchResult(c, now))
-	}
-	s.logSearch(r, opts, len(out.Results), out.Elapsed)
+	final := buildSearchResponse(out, perPage, page, time.Now())
 	sse.send("done", final)
+	s.logSearch(r, opts, len(out.Results), out.Elapsed)
 }
 
 // engineStatus 是单个引擎的自检状态。

@@ -10,10 +10,11 @@ import (
 	"testing"
 
 	"github.com/pigzhu/magnet-search/internal/app"
+	"github.com/pigzhu/magnet-search/internal/store"
 )
 
 func newTestServer() *httptest.Server {
-	s := New(app.Options{}, nil)
+	s := New(app.Options{}, nil, store.AppSettings{})
 	ts := httptest.NewServer(s.Handler())
 	return ts
 }
@@ -126,11 +127,11 @@ func TestPaginate(t *testing.T) {
 }
 
 func TestSettingsAPI(t *testing.T) {
-	srv := New(app.Options{}, nil)
+	srv := New(app.Options{}, nil, store.AppSettings{})
 	ts := httptest.NewServer(srv.Handler())
 	defer ts.Close()
 
-	// 默认没有代理，作用范围是 region
+	// 默认没有代理，作用范围是 region；无数据库时所有开关关闭
 	resp, err := http.Get(ts.URL + "/api/settings")
 	if err != nil {
 		t.Fatalf("读取设置失败: %v", err)
@@ -143,16 +144,32 @@ func TestSettingsAPI(t *testing.T) {
 	if cur.Proxy != "" || cur.ProxyScope != app.ProxyScopeRegion {
 		t.Errorf("默认设置 = %+v，期望空代理 + region", cur)
 	}
+	if cur.DBEnabled || cur.RequireLogin || cur.AllowRegister {
+		t.Errorf("无数据库时默认开关 = %+v，期望全部关闭", cur)
+	}
 
-	// 保存后应能读回
-	body, _ := json.Marshal(Settings{Proxy: "http://127.0.0.1:7890", ProxyScope: app.ProxyScopeAll})
+	// 保存后应能读回；没有数据库时请求里的开启开关会被强制关闭
+	body, _ := json.Marshal(Settings{
+		Proxy:         "http://127.0.0.1:7890",
+		ProxyScope:    app.ProxyScopeAll,
+		DBEnabled:     true,
+		RequireLogin:  true,
+		AllowRegister: true,
+	})
 	resp2, err := http.Post(ts.URL+"/api/settings", "application/json", bytes.NewReader(body))
 	if err != nil {
 		t.Fatalf("保存设置失败: %v", err)
 	}
+	var saved Settings
+	if err := json.NewDecoder(resp2.Body).Decode(&saved); err != nil {
+		t.Fatalf("解析保存结果失败: %v", err)
+	}
 	resp2.Body.Close()
 	if resp2.StatusCode != http.StatusOK {
 		t.Fatalf("保存设置状态码 = %d，期望 200", resp2.StatusCode)
+	}
+	if saved.DBEnabled || saved.RequireLogin || saved.AllowRegister {
+		t.Errorf("无数据库时保存结果 = %+v，期望开关全部关闭", saved)
 	}
 
 	resp3, err := http.Get(ts.URL + "/api/settings")
@@ -166,6 +183,9 @@ func TestSettingsAPI(t *testing.T) {
 	resp3.Body.Close()
 	if after.Proxy != "http://127.0.0.1:7890" || after.ProxyScope != app.ProxyScopeAll {
 		t.Errorf("保存后读回 = %+v，期望代理与 all 范围", after)
+	}
+	if after.DBEnabled || after.RequireLogin || after.AllowRegister {
+		t.Errorf("保存后读回开关 = %+v，期望全部关闭", after)
 	}
 }
 
@@ -190,7 +210,7 @@ func TestSSEWriterFormat(t *testing.T) {
 
 func TestSettingsPreferCommandLineProxy(t *testing.T) {
 	// 命令行传入的代理应当作为界面的初始设置，界面打开即可见
-	srv := New(app.Options{Proxy: []string{"http://127.0.0.1:7890"}}, nil)
+	srv := New(app.Options{Proxy: []string{"http://127.0.0.1:7890"}}, nil, store.AppSettings{})
 	ts := httptest.NewServer(srv.Handler())
 	defer ts.Close()
 
@@ -212,7 +232,7 @@ func TestSettingsPreferCommandLineProxy(t *testing.T) {
 }
 
 func TestSearchOptionsUseSavedProxy(t *testing.T) {
-	srv := New(app.Options{}, nil)
+	srv := New(app.Options{}, nil, store.AppSettings{})
 	srv.settings.Proxy = "http://127.0.0.1:7890"
 	ts := httptest.NewServer(srv.Handler())
 	defer ts.Close()
@@ -224,6 +244,32 @@ func TestSearchOptionsUseSavedProxy(t *testing.T) {
 	}
 	if len(opts.Proxy) != 1 || opts.Proxy[0] != "http://127.0.0.1:7890" {
 		t.Errorf("检索参数里的代理 = %v，期望使用界面保存的代理", opts.Proxy)
+	}
+}
+
+// TestSearchOptionsPoolIndependentOfPerPage 校验结果池与每页条数解耦：
+// 切换每页条数不应改变检索参数与缓存键，否则翻页会重跑网络检索。
+func TestSearchOptionsPoolIndependentOfPerPage(t *testing.T) {
+	srv := New(app.Options{}, nil, store.AppSettings{})
+	reqA := httptest.NewRequest(http.MethodGet, "/api/search?q=ubuntu&per_page=10", nil)
+	reqB := httptest.NewRequest(http.MethodGet, "/api/search?q=ubuntu&per_page=100", nil)
+
+	optsA, perPageA, _, err := srv.searchOptions(reqA)
+	if err != nil {
+		t.Fatalf("解析参数失败: %v", err)
+	}
+	optsB, perPageB, _, err := srv.searchOptions(reqB)
+	if err != nil {
+		t.Fatalf("解析参数失败: %v", err)
+	}
+	if perPageA != 10 || perPageB != 100 {
+		t.Fatalf("每页条数 = %d/%d，期望 10/100", perPageA, perPageB)
+	}
+	if optsA.Limit != resultPoolSize || optsB.Limit != resultPoolSize {
+		t.Errorf("结果池 = %d/%d，期望都等于 %d", optsA.Limit, optsB.Limit, resultPoolSize)
+	}
+	if searchCacheKey(optsA) != searchCacheKey(optsB) {
+		t.Error("切换每页条数不应改变缓存键，否则会重新检索")
 	}
 }
 
@@ -255,6 +301,161 @@ func TestFilterLabelsHaveTips(t *testing.T) {
 	}
 	if labels < 5 {
 		t.Errorf("带提示的筛选项只有 %d 个，应至少覆盖引擎、死链、最少对等端、冷门席位、每簇最多、每页、代理", labels)
+	}
+}
+
+// TestAuthAPINoStore 校验未启用数据库时的认证状态。
+func TestAuthAPINoStore(t *testing.T) {
+	ts := newTestServer()
+	defer ts.Close()
+
+	resp, err := http.Get(ts.URL + "/api/auth")
+	if err != nil {
+		t.Fatalf("请求认证状态失败: %v", err)
+	}
+	defer resp.Body.Close()
+	var state authState
+	if err := json.NewDecoder(resp.Body).Decode(&state); err != nil {
+		t.Fatalf("解析认证状态失败: %v", err)
+	}
+	if state.DBEnabled || state.DBAvailable || state.NeedsSetup || state.LoggedIn ||
+		state.RequireLogin || state.AllowRegister {
+		t.Errorf("无数据库认证状态 = %+v，期望所有开关为 false", state)
+	}
+}
+
+// TestRegisterAPINoStore 校验未启用数据库时注册被拒绝。
+func TestRegisterAPINoStore(t *testing.T) {
+	ts := newTestServer()
+	defer ts.Close()
+
+	body := strings.NewReader(`{"username":"alice","password":"secret1"}`)
+	resp, err := http.Post(ts.URL+"/api/register", "application/json", body)
+	if err != nil {
+		t.Fatalf("请求注册失败: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("无数据库注册状态码 = %d，期望 400", resp.StatusCode)
+	}
+}
+
+// TestRequireAuthNoStore 校验未启用数据库时受保护接口直接放行。
+func TestRequireAuthNoStore(t *testing.T) {
+	srv := New(app.Options{}, nil, store.AppSettings{})
+	called := false
+	h := srv.requireAuth(func(w http.ResponseWriter, r *http.Request) {
+		called = true
+		w.WriteHeader(http.StatusNoContent)
+	})
+
+	rec := httptest.NewRecorder()
+	h(rec, httptest.NewRequest(http.MethodGet, "/api/search?q=ubuntu", nil))
+	if !called {
+		t.Fatal("未启用数据库时 requireAuth 应放行")
+	}
+	if rec.Code != http.StatusNoContent {
+		t.Errorf("状态码 = %d，期望 204", rec.Code)
+	}
+}
+
+// TestSettingsPartialPayload 校验只提交部分字段时布尔开关不会丢失。
+func TestSettingsPartialPayload(t *testing.T) {
+	srv := New(app.Options{}, nil, store.AppSettings{})
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+
+	body := strings.NewReader(`{"proxy":"http://127.0.0.1:7890"}`)
+	resp, err := http.Post(ts.URL+"/api/settings", "application/json", body)
+	if err != nil {
+		t.Fatalf("保存设置失败: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("部分字段保存状态码 = %d，期望 200", resp.StatusCode)
+	}
+	var got Settings
+	if err := json.NewDecoder(resp.Body).Decode(&got); err != nil {
+		t.Fatalf("解析设置失败: %v", err)
+	}
+	if got.Proxy != "http://127.0.0.1:7890" {
+		t.Errorf("代理 = %q，期望保存的地址", got.Proxy)
+	}
+	if got.DBEnabled || got.RequireLogin || got.AllowRegister {
+		t.Errorf("省略的布尔开关 = %+v，期望保持关闭", got)
+	}
+}
+
+// TestNewAuthSettings 校验构造时按数据库可用性初始化安全开关。
+func TestNewAuthSettings(t *testing.T) {
+	none := New(app.Options{}, nil, store.AppSettings{RequireLogin: true, AllowRegister: true})
+	none.settingsMu.RLock()
+	gotNone := none.settings
+	none.settingsMu.RUnlock()
+	if gotNone.DBEnabled || gotNone.RequireLogin || gotNone.AllowRegister {
+		t.Errorf("无数据库初始设置 = %+v，期望开关全部关闭", gotNone)
+	}
+
+	withDB := New(app.Options{}, &store.Store{}, store.AppSettings{RequireLogin: true, AllowRegister: true})
+	withDB.settingsMu.RLock()
+	gotDB := withDB.settings
+	withDB.settingsMu.RUnlock()
+	if !gotDB.DBEnabled || !gotDB.RequireLogin || !gotDB.AllowRegister {
+		t.Errorf("有数据库初始设置 = %+v，期望数据库与安全开关均开启", gotDB)
+	}
+}
+
+// TestRequireAuthHonorsLoginSwitch 校验关闭登录要求、或还没有账号时直接放行。
+func TestRequireAuthHonorsLoginSwitch(t *testing.T) {
+	cases := []struct {
+		name     string
+		settings store.AppSettings
+	}{
+		{name: "关闭登录要求时放行", settings: store.AppSettings{RequireLogin: false}},
+		{name: "要求登录但还没有账号时放行", settings: store.AppSettings{RequireLogin: true}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			srv := New(app.Options{}, &store.Store{}, c.settings)
+			called := false
+			h := srv.requireAuth(func(w http.ResponseWriter, r *http.Request) {
+				called = true
+				w.WriteHeader(http.StatusNoContent)
+			})
+			rec := httptest.NewRecorder()
+			h(rec, httptest.NewRequest(http.MethodGet, "/api/search", nil))
+			if !called {
+				t.Fatalf("请求应被放行，状态码 %d", rec.Code)
+			}
+		})
+	}
+}
+
+// TestSettingsNeedsAuth 校验安全设置变更与关闭数据库记录的登录要求。
+func TestSettingsNeedsAuth(t *testing.T) {
+	requireLogin := Settings{DBEnabled: true, RequireLogin: true, AllowRegister: false}
+	openSearch := Settings{DBEnabled: true, RequireLogin: false, AllowRegister: false}
+
+	cases := []struct {
+		name  string
+		cur   Settings
+		next  Settings
+		users int
+		want  bool
+	}{
+		{"没有账号时无需登录", requireLogin, Settings{DBEnabled: true, RequireLogin: false}, 0, false},
+		{"修改登录开关需要登录", requireLogin, Settings{DBEnabled: true, RequireLogin: false}, 1, true},
+		{"修改注册开关需要登录", requireLogin, Settings{DBEnabled: true, RequireLogin: true, AllowRegister: true}, 1, true},
+		{"要求登录时关闭数据库需要登录", requireLogin, Settings{DBEnabled: false, RequireLogin: true}, 1, true},
+		{"不要求登录时关闭数据库无需登录", openSearch, Settings{DBEnabled: false, RequireLogin: false}, 1, false},
+		{"只改代理无需登录", requireLogin, Settings{DBEnabled: true, RequireLogin: true, Proxy: "http://127.0.0.1:7890"}, 1, false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := settingsNeedsAuth(c.cur, c.next, c.users); got != c.want {
+				t.Errorf("settingsNeedsAuth = %v，期望 %v", got, c.want)
+			}
+		})
 	}
 }
 

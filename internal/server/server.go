@@ -28,10 +28,10 @@ var webFS embed.FS
 const (
 	// maxPerPage 单页最多显示多少条
 	maxPerPage = 100
-	// poolPagesFactor 结果池是每页条数的多少倍
-	poolPagesFactor = 5
-	// maxPoolSize 结果池上限
-	maxPoolSize = 200
+	// resultPoolSize 是每次检索取回并缓存的结果池大小。
+	// 它与每页条数解耦：翻页、切换每页条数都复用同一份检索结果，
+	// 不会因为改每页条数而重新跑一遍网络检索，也能让翻页看到更多结果。
+	resultPoolSize = 300
 )
 
 // Server 是 Web 服务。
@@ -60,24 +60,45 @@ type Settings struct {
 	ProxyScope string `json:"proxy_scope"`
 	// DBEnabled 数据库是否启用；关闭时不记录检索、也不需要登录
 	DBEnabled bool `json:"db_enabled"`
+	// RequireLogin 是否要求登录后才能检索
+	RequireLogin bool `json:"require_login"`
+	// AllowRegister 是否允许自助注册账号
+	AllowRegister bool `json:"allow_register"`
+}
+
+// settingsRequest 是保存设置的请求体。
+// 安全开关用指针接收，缺省时保留当前值，兼容只提交部分字段的客户端。
+type settingsRequest struct {
+	Proxy         string `json:"proxy"`
+	ProxyScope    string `json:"proxy_scope"`
+	DBEnabled     *bool  `json:"db_enabled"`
+	RequireLogin  *bool  `json:"require_login"`
+	AllowRegister *bool  `json:"allow_register"`
 }
 
 // New 创建 Web 服务。
-func New(defaults app.Options, st *store.Store) *Server {
+// st 为 nil 时不启用数据库，登录与注册相关开关一律关闭；
+// 否则以 dbSettings 作为库里读取到的初始安全开关。
+func New(defaults app.Options, st *store.Store, dbSettings store.AppSettings) *Server {
 	reg := engine.NewRegistry()
 	engine.RegisterAll(reg)
+	settings := Settings{
+		// 命令行传入的代理作为初始设置，界面打开时直接可见
+		Proxy:      strings.Join(defaults.Proxy, ","),
+		ProxyScope: app.ProxyScopeRegion,
+		DBEnabled:  st != nil,
+	}
+	if st != nil {
+		settings.RequireLogin = dbSettings.RequireLogin
+		settings.AllowRegister = dbSettings.AllowRegister
+	}
 	return &Server{
 		defaults:    defaults,
 		engineSpecs: reg.Specs(),
 		cache:       newSearchCache(),
-		settings: Settings{
-			// 命令行传入的代理作为初始设置，界面打开时直接可见
-			Proxy:      strings.Join(defaults.Proxy, ","),
-			ProxyScope: app.ProxyScopeRegion,
-			DBEnabled:  st != nil,
-		},
-		store:      st,
-		authSecret: newAuthSecret(),
+		settings:    settings,
+		store:       st,
+		authSecret:  newAuthSecret(),
 	}
 }
 
@@ -95,6 +116,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/settings", s.handleSettings)
 	mux.HandleFunc("/api/auth", s.handleAuth)
 	mux.HandleFunc("/api/login", s.handleLogin)
+	mux.HandleFunc("/api/register", s.handleRegister)
 	mux.HandleFunc("/api/logout", s.handleLogout)
 	mux.HandleFunc("/api/account", s.handleAccount)
 	mux.HandleFunc("/api/search", s.requireAuth(s.handleSearch))
@@ -160,28 +182,87 @@ func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
 		s.settingsMu.RUnlock()
 		writeJSON(w, http.StatusOK, cur)
 	case http.MethodPost:
-		var incoming Settings
-		if err := json.NewDecoder(r.Body).Decode(&incoming); err != nil {
+		var in settingsRequest
+		if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "设置格式不正确: " + err.Error()})
 			return
 		}
-		if incoming.ProxyScope != app.ProxyScopeAll {
-			incoming.ProxyScope = app.ProxyScopeRegion
+		s.settingsMu.RLock()
+		cur := s.settings
+		s.settingsMu.RUnlock()
+		next := cur
+
+		next.Proxy = strings.TrimSpace(in.Proxy)
+		next.ProxyScope = app.ProxyScopeRegion
+		if in.ProxyScope == app.ProxyScopeAll {
+			next.ProxyScope = app.ProxyScopeAll
 		}
-		// 没有配置数据库连接时，开关只能是关闭状态
+		if in.DBEnabled != nil {
+			next.DBEnabled = *in.DBEnabled
+		}
+		// 没有配置数据库连接时，所有数据库相关开关只能是关闭状态
 		if s.store == nil {
-			incoming.DBEnabled = false
+			next.DBEnabled = false
+			next.RequireLogin = false
+			next.AllowRegister = false
+		} else {
+			if in.RequireLogin != nil {
+				next.RequireLogin = *in.RequireLogin
+			}
+			if in.AllowRegister != nil {
+				next.AllowRegister = *in.AllowRegister
+			}
+			securityChanged := next.RequireLogin != cur.RequireLogin ||
+				next.AllowRegister != cur.AllowRegister
+			bypassLogin := cur.RequireLogin && cur.DBEnabled && !next.DBEnabled
+			// 只有涉及安全语义的变更才需要查账号并校验会话；
+			// 纯代理或非安全状态下的记录开关不应受数据库短暂不可用影响。
+			if securityChanged || bypassLogin {
+				count, err := s.store.CountUsers(r.Context())
+				if err != nil {
+					writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+					return
+				}
+				if settingsNeedsAuth(cur, next, count) {
+					if _, ok := s.sessionUser(r); !ok {
+						writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "请先登录后再修改安全设置"})
+						return
+					}
+				}
+			}
+			// 安全开关变化时先落库再改内存，保存失败时保持原设置不变
+			if securityChanged {
+				if err := s.store.SaveSettings(r.Context(), store.AppSettings{
+					RequireLogin:  next.RequireLogin,
+					AllowRegister: next.AllowRegister,
+				}); err != nil {
+					writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+					return
+				}
+			}
 		}
-		incoming.Proxy = strings.TrimSpace(incoming.Proxy)
 		s.settingsMu.Lock()
-		s.settings = incoming
+		s.settings = next
 		s.settingsMu.Unlock()
 		// 设置变了，之前的检索缓存不再适用
 		s.cache.clear()
-		writeJSON(w, http.StatusOK, incoming)
+		writeJSON(w, http.StatusOK, next)
 	default:
 		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "只支持 GET 与 POST"})
 	}
+}
+
+// settingsNeedsAuth 判断一次设置变更是否需要登录。
+// 已有账号时，修改登录/注册开关属于安全变更；
+// 当前要求登录时关闭数据库记录会绕过登录校验，同样需要登录。
+func settingsNeedsAuth(cur, next Settings, userCount int) bool {
+	if userCount == 0 {
+		return false
+	}
+	securityChanged := next.RequireLogin != cur.RequireLogin ||
+		next.AllowRegister != cur.AllowRegister
+	bypassLogin := cur.RequireLogin && cur.DBEnabled && !next.DBEnabled
+	return securityChanged || bypassLogin
 }
 
 // engineHealth 是单个引擎的自检结果。
@@ -419,10 +500,9 @@ func (s *Server) searchOptions(r *http.Request) (app.Options, int, int, error) {
 		}
 	}
 
-	// 结果池取每页条数的若干倍，够翻几页；翻到池子尽头再自动扩大重取。
-	poolSize := poolSizeFor(perPage)
-	opts.Limit = poolSize
-	opts.PerEngineLimit = poolSize
+	// 结果池固定，翻页与切换每页条数都复用同一份检索结果。
+	opts.Limit = resultPoolSize
+	opts.PerEngineLimit = resultPoolSize
 	return opts, perPage, page, nil
 }
 
@@ -446,9 +526,22 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		out = result
-		s.cache.put(key, out)
+		// 客户端中途断开时检索结果可能不完整，不能写进缓存
+		if r.Context().Err() == nil {
+			s.cache.put(key, out)
+		}
 	}
 
+	writeJSON(w, http.StatusOK, buildSearchResponse(out, perPage, page, time.Now()))
+
+	// 只有真正跑了检索才记录，翻页命中缓存不重复计入检索日志
+	if !cached {
+		s.logSearch(r, opts, len(out.Results), out.Elapsed)
+	}
+}
+
+// buildSearchResponse 把完整的排序结果切成一页并组装成接口响应。
+func buildSearchResponse(out *app.Outcome, perPage, page int, now time.Time) searchResponse {
 	total := len(out.Results)
 	start, end, page, totalPages := paginate(total, perPage, page)
 	pageItems := out.Results[start:end]
@@ -466,29 +559,15 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 		Page:           page,
 		PerPage:        perPage,
 		TotalPages:     totalPages,
-		PoolSize:       poolSizeFor(perPage),
+		PoolSize:       resultPoolSize,
 	}
 	for _, f := range out.Failures {
 		resp.Failures = append(resp.Failures, map[string]string{"engine": f.Engine, "error": f.Err.Error()})
 	}
-
-	now := time.Now()
 	for _, c := range pageItems {
 		resp.Results = append(resp.Results, newSearchResult(c, now))
 	}
-
-	s.logSearch(r, opts, len(out.Results), out.Elapsed)
-
-	writeJSON(w, http.StatusOK, resp)
-}
-
-// poolSizeFor 返回结果池大小：每页条数的若干倍，够翻几页。
-func poolSizeFor(perPage int) int {
-	poolSize := perPage * poolPagesFactor
-	if poolSize > maxPoolSize {
-		poolSize = maxPoolSize
-	}
-	return poolSize
+	return resp
 }
 
 // paginate 计算分页切片区间，并把越界的页码收敛到最后一页。
@@ -533,6 +612,10 @@ func searchCacheKey(opts app.Options) string {
 		strconv.Itoa(opts.RareMaxPeers),
 		strconv.Itoa(opts.PerCluster),
 		strconv.FormatBool(opts.Probe),
+		strconv.FormatBool(opts.SplitQuery),
+		strconv.Itoa(opts.MaxQueryTerms),
+		strings.Join(opts.Proxy, ","),
+		opts.ProxyScope,
 	}, "|")
 }
 

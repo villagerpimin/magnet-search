@@ -8,6 +8,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -15,6 +16,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/pigzhu/magnet-search/internal/store"
 	"golang.org/x/crypto/bcrypt"
 )
 
@@ -42,6 +44,10 @@ type authState struct {
 	LoggedIn bool `json:"logged_in"`
 	// Username 当前登录的用户名
 	Username string `json:"username,omitempty"`
+	// RequireLogin 是否要求登录后才能检索
+	RequireLogin bool `json:"require_login"`
+	// AllowRegister 是否允许自助注册
+	AllowRegister bool `json:"allow_register"`
 }
 
 // dbEnabled 判断数据库是否启用。
@@ -51,19 +57,42 @@ func (s *Server) dbEnabled() bool {
 	return s.store != nil && s.settings.DBEnabled
 }
 
+// requireLogin 判断是否要求登录后才能检索。
+func (s *Server) requireLogin() bool {
+	s.settingsMu.RLock()
+	defer s.settingsMu.RUnlock()
+	return s.store != nil && s.settings.RequireLogin
+}
+
+// allowRegister 判断是否允许自助注册账号。
+func (s *Server) allowRegister() bool {
+	s.settingsMu.RLock()
+	defer s.settingsMu.RUnlock()
+	return s.store != nil && s.settings.AllowRegister
+}
+
 // handleAuth 返回当前认证状态。
 func (s *Server) handleAuth(w http.ResponseWriter, r *http.Request) {
-	state := authState{DBEnabled: s.dbEnabled(), DBAvailable: s.store != nil}
+	s.settingsMu.RLock()
+	cur := s.settings
+	s.settingsMu.RUnlock()
+
+	state := authState{
+		DBEnabled:     s.store != nil && cur.DBEnabled,
+		DBAvailable:   s.store != nil,
+		RequireLogin:  s.store != nil && cur.RequireLogin,
+		AllowRegister: s.store != nil && cur.AllowRegister,
+	}
 	if !state.DBEnabled {
 		writeJSON(w, http.StatusOK, state)
 		return
 	}
-	_, _, found, err := s.store.Account(r.Context())
+	count, err := s.store.CountUsers(r.Context())
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
-	state.NeedsSetup = !found
+	state.NeedsSetup = count == 0
 	if name, ok := s.sessionUser(r); ok {
 		state.LoggedIn = true
 		state.Username = name
@@ -96,17 +125,22 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	name, hash, found, err := s.store.Account(r.Context())
+	count, err := s.store.CountUsers(r.Context())
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
-	if !found {
+	if count == 0 {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "还没有设置账号，请先设置"})
 		return
 	}
-	if !strings.EqualFold(strings.TrimSpace(in.Username), name) ||
-		bcrypt.CompareHashAndPassword(hash, []byte(in.Password)) != nil {
+
+	name, hash, found, err := s.store.User(r.Context(), strings.TrimSpace(in.Username))
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	if !found || bcrypt.CompareHashAndPassword(hash, []byte(in.Password)) != nil {
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "用户名或密码不正确"})
 		return
 	}
@@ -115,41 +149,20 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "username": name})
 }
 
-// handleLogout 清除会话。
-func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
-	http.SetCookie(w, &http.Cookie{
-		Name:     sessionCookie,
-		Value:    "",
-		Path:     "/",
-		HttpOnly: true,
-		SameSite: http.SameSiteLaxMode,
-		MaxAge:   -1,
-	})
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
-}
-
-// handleAccount 设置或修改登录账号。
-// 还没有账号时允许直接设置（首次初始化）；已有账号时必须是已登录状态。
-func (s *Server) handleAccount(w http.ResponseWriter, r *http.Request) {
+// handleRegister 处理自助注册。
+// 必须先启用数据库并打开注册开关，注册成功后直接登录。
+func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "只支持 POST"})
 		return
 	}
 	if !s.dbEnabled() {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "数据库未启用，无法设置账号"})
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "数据库未启用，无法注册"})
 		return
 	}
-
-	_, _, found, err := s.store.Account(r.Context())
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+	if !s.allowRegister() {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "未开放注册"})
 		return
-	}
-	if found {
-		if _, ok := s.sessionUser(r); !ok {
-			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "请先登录再修改账号"})
-			return
-		}
 	}
 
 	var in credentials
@@ -172,7 +185,11 @@ func (s *Server) handleAccount(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "密码处理失败"})
 		return
 	}
-	if err := s.store.SetAccount(r.Context(), in.Username, hash); err != nil {
+	if err := s.store.CreateUser(r.Context(), in.Username, hash); err != nil {
+		if errors.Is(err, store.ErrUserExists) {
+			writeJSON(w, http.StatusConflict, map[string]string{"error": "用户名已存在"})
+			return
+		}
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
@@ -181,20 +198,107 @@ func (s *Server) handleAccount(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "username": in.Username})
 }
 
-// requireAuth 在启用数据库且已设置账号时，要求请求带上有效会话。
+// handleLogout 清除会话。
+func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
+	http.SetCookie(w, &http.Cookie{
+		Name:     sessionCookie,
+		Value:    "",
+		Path:     "/",
+		HttpOnly: true,
+		SameSite: http.SameSiteLaxMode,
+		MaxAge:   -1,
+	})
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+// handleAccount 设置或修改登录账号。
+// 还没有账号时允许直接设置（首次初始化）；已有账号时只能修改当前登录账号。
+func (s *Server) handleAccount(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "只支持 POST"})
+		return
+	}
+	if !s.dbEnabled() {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "数据库未启用，无法设置账号"})
+		return
+	}
+
+	count, err := s.store.CountUsers(r.Context())
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	var current string
+	if count > 0 {
+		name, ok := s.sessionUser(r)
+		if !ok {
+			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "请先登录再修改账号"})
+			return
+		}
+		current = name
+	}
+
+	var in credentials
+	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "请求格式不正确"})
+		return
+	}
+	in.Username = strings.TrimSpace(in.Username)
+	if len([]rune(in.Username)) < minUsernameLen {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": fmt.Sprintf("用户名至少 %d 个字符", minUsernameLen)})
+		return
+	}
+
+	// 首次设置必须给密码；已有账号时留空表示保持原密码
+	var hash []byte
+	if count == 0 || in.Password != "" {
+		if len(in.Password) < minPasswordLen {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": fmt.Sprintf("密码至少 %d 位", minPasswordLen)})
+			return
+		}
+		hash, err = bcrypt.GenerateFromPassword([]byte(in.Password), bcrypt.DefaultCost)
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "密码处理失败"})
+			return
+		}
+	}
+
+	if count == 0 {
+		err = s.store.CreateUser(r.Context(), in.Username, hash)
+	} else {
+		err = s.store.UpdateUser(r.Context(), current, in.Username, hash)
+	}
+	if err != nil {
+		if errors.Is(err, store.ErrUserExists) {
+			writeJSON(w, http.StatusConflict, map[string]string{"error": "用户名已存在"})
+			return
+		}
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+
+	s.setSession(w, in.Username)
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "username": in.Username})
+}
+
+// requireAuth 在启用数据库、要求登录且已有账号时，要求请求带上有效会话。
 func (s *Server) requireAuth(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if !s.dbEnabled() {
 			next(w, r)
 			return
 		}
-		_, _, found, err := s.store.Account(r.Context())
+		if !s.requireLogin() {
+			next(w, r)
+			return
+		}
+		count, err := s.store.CountUsers(r.Context())
 		if err != nil {
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 			return
 		}
 		// 还没有账号时不拦，让界面先完成首次设置
-		if !found {
+		if count == 0 {
 			next(w, r)
 			return
 		}

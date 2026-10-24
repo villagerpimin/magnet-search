@@ -60,6 +60,7 @@ header {
 .health .dot.bad { background: var(--dead); }
 .health button { color: var(--muted); text-decoration: underline dotted; }
 .health button:hover { color: var(--text); }
+#accountChip { display: inline-flex; align-items: center; gap: 10px; }
 
 /* 搜索区 */
 .searchwrap { padding: 18px 20px 0; }
@@ -83,23 +84,27 @@ header {
   padding: 12px 2px; font-size: 13px; color: var(--muted);
 }
 .filters .grp { display: flex; align-items: center; gap: 6px; }
-/* 自绘提示：原生 title 要悬停一秒才出、且只在小段文字上触发，等于没有 */
-.tip { position: relative; cursor: help; }
+.dbgrp { display: flex; flex-direction: column; gap: 7px; }
+/* 自绘提示：固定定位，脚本按视口边缘收敛位置，手机上也能点开 */
+.tip { cursor: help; }
 .tip .q {
   display: inline-block; width: 14px; height: 14px; line-height: 13px; text-align: center;
   border-radius: 50%; border: 1px solid var(--border); color: var(--muted);
   font-size: 10px; font-weight: 600; margin-left: 5px; vertical-align: 1px; user-select: none;
 }
-.tip:hover .q { color: var(--accent); border-color: var(--accent); }
-.tip:hover::after {
-  content: attr(data-tip);
-  position: absolute; left: 0; top: calc(100% + 7px); z-index: 60;
-  width: 300px; padding: 10px 12px; border-radius: 9px;
+.tip:hover .q, .tip:focus .q { color: var(--accent); border-color: var(--accent); }
+.tip-bubble {
+  position: fixed; z-index: 70; width: max-content;
+  max-width: min(320px, calc(100vw - 24px)); max-height: min(70vh, 480px);
+  overflow-y: auto; overscroll-behavior: contain;
+  padding: 10px 12px; border-radius: 9px;
   background: var(--panel); border: 1px solid var(--accent); color: var(--text);
   font-size: 12px; line-height: 1.65; font-weight: 400; text-align: left;
   white-space: pre-line; box-shadow: 0 10px 28px rgba(0,0,0,.4);
-  pointer-events: none;
+  pointer-events: none; visibility: hidden;
 }
+.tip-bubble.open { visibility: visible; }
+.tip-bubble[hidden] { display: none; }
 .filters label { white-space: nowrap; }
 .filters select, .filters input[type=number] {
   background: var(--panel); color: var(--text); border: 1px solid var(--border);
@@ -125,9 +130,10 @@ header {
 .toggle input { accent-color: var(--accent); }
 
 /* 结果区 */
-main { flex: 1; padding: 4px 20px 28px; }
+main { flex: 1; padding: 4px 20px 28px; scroll-margin-top: 64px; }
 .status { color: var(--muted); font-size: 12.5px; padding: 6px 2px 10px; display: flex; gap: 14px; flex-wrap: wrap; align-items: center; }
 .status .warn { color: var(--cold); }
+.paging-hint { display: inline-flex; align-items: center; gap: 6px; }
 .results { display: flex; flex-direction: column; gap: 8px; }
 .results .card { order: 0; }
 .card {
@@ -172,6 +178,8 @@ main { flex: 1; padding: 4px 20px 28px; }
 .pager button:hover:not(:disabled) { color: var(--text); border-color: var(--accent); }
 .pager button.on { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
 .pager button:disabled { opacity: .35; cursor: default; }
+.pager.loading { opacity: .55; }
+.pager.loading button { pointer-events: none; }
 .pager .info { color: var(--muted); font-size: 12.5px; margin-left: 12px; }
 
 .empty { color: var(--muted); text-align: center; padding: 60px 0; }
@@ -288,7 +296,7 @@ main { flex: 1; padding: 4px 20px 28px; }
   .filters .grp { gap: 5px; flex-wrap: wrap; }
   .filters input[type=text] { width: 100%; min-width: 0; }
   .filters select, .filters input[type=number] { font-size: 12px; }
-  .tip:hover::after { left: auto; right: 0; width: min(86vw, 300px); }
+  .tip-bubble { max-width: calc(100vw - 24px); max-height: calc(100vh - 24px); font-size: 12.5px; }
   .status { font-size: 11.5px; gap: 6px 10px; padding: 4px 0 10px; }
 
   /* 结果卡片：状态与按钮折到下一行，标题占满宽度 */
@@ -330,7 +338,9 @@ main { flex: 1; padding: 4px 20px 28px; }
     <span id="healthText">引擎状态未知</span>
     <button id="healthBtn" type="button">检测</button>
     <span id="accountChip" style="display:none">
+      <button id="loginBtn" type="button" title="登录">登录</button>
       <button id="accountBtn" type="button" title="账号设置">账号</button>
+      <button id="logoutBtn" type="button" title="退出登录">退出</button>
     </span>
   </div>
 </header>
@@ -387,9 +397,19 @@ main { flex: 1; padding: 4px 20px 28px; }
     <div class="grp">
       <label class="toggle"><input id="probe" type="checkbox" checked>网络存活探测</label>
     </div>
-    <div class="grp" id="dbGrp" style="display:none">
-      <label class="tip" data-tip="开启后每一次检索都会写入 MySQL（关键词、时间、来源 IP、结果条数），并启用登录校验。&#10;&#10;关闭后不记录、也不需要登录。&#10;服务未配置数据库连接时这项不可用。">记录到数据库<span class="q">?</span></label>
-      <label class="toggle"><input id="dbEnabled" type="checkbox">启用</label>
+    <div class="dbgrp" id="dbGrp" style="display:none">
+      <div class="grp">
+        <label class="tip" data-tip="开启后每一次检索都会写入 MySQL（关键词、时间、来源 IP、结果条数）；是否要求登录由下面的「检索需要登录」开关决定。&#10;&#10;关闭后不记录、也不需要登录。&#10;服务未配置数据库连接时这项不可用。">记录到数据库<span class="q">?</span></label>
+        <label class="toggle"><input id="dbEnabled" type="checkbox">启用</label>
+      </div>
+      <div class="grp">
+        <label class="tip" data-tip="开启后，系统已有账号时检索必须先登录；关闭后任何人都可以直接检索。&#10;&#10;只有已登录用户，或还没有任何账号的全新系统，才能修改这项安全设置。">检索需要登录<span class="q">?</span></label>
+        <label class="toggle"><input id="requireLogin" type="checkbox">启用</label>
+      </div>
+      <div class="grp">
+        <label class="tip" data-tip="开启后，登录界面会显示「还没有账号？注册」入口，允许访客自助注册账号。&#10;&#10;关闭后不显示注册入口；已有账号仍可登录，并在右上角「账号」里修改自己的用户名/密码。">允许注册账号<span class="q">?</span></label>
+        <label class="toggle"><input id="allowRegister" type="checkbox">启用</label>
+      </div>
     </div>
     <div class="grp">
       <label class="tip" data-tip="代理地址，留空表示不使用。&#10;&#10;服务启动时带的 --proxy 会自动填在这里，之后的检索与自检都按它走。&#10;「仅境外引擎」= 境内与通用引擎直连、境外引擎优先走代理；「全部引擎」= 所有引擎都优先走代理。&#10;可以填多个，用逗号分隔，失败会自动换下一个。">代理<span class="q">?</span></label>
@@ -444,6 +464,12 @@ main { flex: 1; padding: 4px 20px 28px; }
     </label>
     <button class="gate-submit" id="gateSubmit" type="submit">登录</button>
     <div class="gate-err" id="gateErr"></div>
+    <div class="gate-foot" id="gateRegisterWrap" style="display:none">
+      <a href="#" id="gateRegister">还没有账号？注册</a>
+    </div>
+    <div class="gate-foot" id="gateLoginWrap" style="display:none">
+      <a href="#" id="gateLoginBack">已有账号？登录</a>
+    </div>
     <div class="gate-foot" id="gateFoot" style="display:none">
       <a href="#" id="gateLogout">退出登录</a>
     </div>
@@ -451,17 +477,26 @@ main { flex: 1; padding: 4px 20px 28px; }
 </div>
 
 <div class="toast" id="toast"></div>
+<div class="tip-bubble" id="tipBubble" role="tooltip" hidden></div>
 
 <script>
 const $ = (id) => document.getElementById(id);
 let engines = [];
 let activeEngines = new Set();
-let currentPage = 1;
 let lastData = null;
 let stream = null;
+let searchState = null;
+let searchSeq = 0;
 let liveResults = [];
 let engineProgress = {};
-let authState = { db_enabled: false, db_available: false, needs_setup: false, logged_in: false };
+let authState = {
+  db_enabled: false,
+  db_available: false,
+  needs_setup: false,
+  logged_in: false,
+  require_login: false,
+  allow_register: false,
+};
 let gateMode = "login";
 
 const VERDICT = {
@@ -610,11 +645,12 @@ function drawDots(seen) {
 }
 
 /* ---------- 检索参数 ---------- */
-function buildParams(q, page) {
-  const params = new URLSearchParams({
+// snapshotParams 保存一次检索的筛选条件；翻页必须沿用它，
+// 否则用户改了输入框或筛选条后点页码，会拿新条件去翻旧结果。
+function snapshotParams(q) {
+  return new URLSearchParams({
     q,
     per_page: $("perPage").value || "20",
-    page: String(page),
     engines: [...activeEngines].join(","),
     dead_filter: $("deadFilter").value,
     min_peers: $("minPeers").value || "0",
@@ -622,48 +658,86 @@ function buildParams(q, page) {
     per_cluster: $("perCluster").value || "0",
     probe: $("probe").checked ? "1" : "0",
   });
+}
+
+// pageParams 在参数快照上只替换页码。
+function pageParams(page) {
+  const params = new URLSearchParams(searchState.params);
+  params.set("page", String(page));
   return params;
 }
 
+function setPagerLoading(on) {
+  const box = $("pager");
+  box.classList.toggle("loading", on);
+  box.setAttribute("aria-busy", on ? "true" : "false");
+}
+
+function addPageHint(page) {
+  const hint = document.createElement("span");
+  hint.className = "paging-hint";
+  hint.innerHTML = `<span class="spinner"></span> 正在载入第 ${page} 页…`;
+  $("status").appendChild(hint);
+}
+
 /* ---------- 搜索 ---------- */
-async function search(page = 1) {
-  const q = $("q").value.trim();
-  if (!q) return;
-  currentPage = page;
+async function search(page = 1, useSnapshot = false) {
+  if (page === 1 && !useSnapshot) {
+    const q = $("q").value.trim();
+    if (!q) return;
+    searchState = { query: q, params: snapshotParams(q) };
+  } else if (!searchState) {
+    return;
+  }
+  const seq = ++searchSeq;
   closeStream();
   $("go").disabled = true;
-  $("status").innerHTML = `<span><span class="spinner"></span> 搜索中…</span>`;
-  $("pager").innerHTML = "";
 
-  if (page === 1) {
-    await streamSearch(q);
-  } else {
-    await fetchPage(q, page);
+  try {
+    if (page === 1 && !useSnapshot) {
+      setPagerLoading(false);
+      $("status").innerHTML = `<span><span class="spinner"></span> 搜索中…</span>`;
+      $("pager").innerHTML = "";
+      await streamSearch(seq);
+    } else {
+      // 保留上一页内容和页码，只置灰并加提示，避免整屏像重新加载
+      setPagerLoading(true);
+      addPageHint(page);
+      const ok = await fetchPage(page, seq);
+      setPagerLoading(false);
+      if (ok && seq === searchSeq) {
+        document.querySelector("main").scrollIntoView({ block: "start" });
+      }
+    }
+  } finally {
+    if (seq === searchSeq) $("go").disabled = false;
   }
-  $("go").disabled = false;
 }
 
 // streamSearch 用 SSE 边搜边出：引擎一完成就报进度，结果一条条上屏。
-function streamSearch(q) {
+function streamSearch(seq) {
   return new Promise((resolve) => {
-    const es = new EventSource("/api/search/stream?" + buildParams(q, 1).toString());
+    const es = new EventSource("/api/search/stream?" + pageParams(1).toString());
     stream = es;
     resetLive();
     engineProgress = {};
 
     es.addEventListener("engine", (e) => {
+      if (seq !== searchSeq) return;
       const d = JSON.parse(e.data);
       engineProgress[d.engine] = d;
       renderProgress();
     });
     es.addEventListener("result", (e) => {
+      if (seq !== searchSeq) return;
       pushLive(JSON.parse(e.data));
     });
     es.addEventListener("done", (e) => {
       const d = JSON.parse(e.data);
-      lastData = d;
       es.close();
-      stream = null;
+      if (stream === es) stream = null;
+      if (seq !== searchSeq) { resolve(); return; }
+      lastData = d;
       renderStatus(d);
       renderResults(d.results || []);
       renderPager(d);
@@ -671,34 +745,43 @@ function streamSearch(q) {
     });
     es.addEventListener("error", async () => {
       es.close();
-      stream = null;
+      if (stream === es) stream = null;
+      if (seq !== searchSeq) { resolve(); return; }
       // 可能是会话失效导致 401，回到登录面板
       const state = await loadAuth();
+      if (seq !== searchSeq) { resolve(); return; }
       if (state.db_enabled && !state.logged_in) {
         $("status").innerHTML = `<span class="warn">登录状态已失效，请重新登录</span>`;
+      } else {
+        $("status").innerHTML = `<span class="warn">搜索失败，请重试</span>`;
       }
       resolve();
     });
   });
 }
 
-// fetchPage 翻页走普通接口：服务端有结果缓存，翻页是秒回。
-async function fetchPage(q, page) {
+// fetchPage 翻页走普通接口：服务端缓存了完整结果池，翻页是秒回。
+async function fetchPage(page, seq) {
   try {
-    const resp = await fetch("/api/search?" + buildParams(q, page).toString());
+    const resp = await fetch("/api/search?" + pageParams(page).toString());
+    if (seq !== searchSeq) return false;
     if (resp.status === 401) {
       await loadAuth();
       $("status").innerHTML = `<span class="warn">请先登录</span>`;
-      return;
+      return false;
     }
     const data = await resp.json();
+    if (seq !== searchSeq) return false;
     if (data.error) throw new Error(data.error);
     lastData = data;
     renderStatus(data);
     renderResults(data.results || []);
     renderPager(data);
+    return true;
   } catch (e) {
+    if (seq !== searchSeq) return false;
     $("status").innerHTML = `<span class="warn">翻页失败：${escapeHtml(e.message || String(e))}</span>`;
+    return false;
   }
 }
 
@@ -862,7 +945,7 @@ function renderPager(data) {
     b.textContent = label;
     if (opts.on) b.className = "on";
     if (opts.disabled) b.disabled = true;
-    else b.onclick = () => search(target);
+    else b.onclick = () => search(target, true);
     return b;
   };
 
@@ -895,33 +978,60 @@ function renderPager(data) {
   box.appendChild(info);
 }
 
-/* ---------- 设置：代理 ---------- */
+/* ---------- 设置：代理与安全开关 ---------- */
+let lastSettingsUnauthorized = false;
+
 async function loadSettings() {
   try {
     const s = await (await fetch("/api/settings")).json();
     $("proxy").value = s.proxy || "";
     $("proxyScope").value = s.proxy_scope === "all" ? "all" : "region";
     $("dbEnabled").checked = !!s.db_enabled;
+    $("requireLogin").checked = !!s.require_login;
+    $("allowRegister").checked = !!s.allow_register;
   } catch (e) { /* 读不到就保持默认 */ }
 }
 
 async function saveSettings(dbEnabled) {
+  lastSettingsUnauthorized = false;
   const body = {
     proxy: $("proxy").value.trim(),
     proxy_scope: $("proxyScope").value,
     db_enabled: dbEnabled != null ? dbEnabled : $("dbEnabled").checked,
+    require_login: $("requireLogin").checked,
+    allow_register: $("allowRegister").checked,
   };
   try {
-    await fetch("/api/settings", {
+    const resp = await fetch("/api/settings", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
     });
+    if (!resp.ok) {
+      let data = {};
+      try { data = await resp.json(); } catch (e) { /* 非 JSON 错误响应 */ }
+      if (resp.status === 401) {
+        lastSettingsUnauthorized = true;
+        await loadAuth();
+        showLoginGate();
+        toast("请先登录");
+      } else {
+        toast(data.error || "设置保存失败");
+      }
+      return false;
+    }
     return true;
   } catch (e) {
     toast("设置保存失败");
     return false;
   }
+}
+
+// settingsSaveDone 统一处理保存后的认证刷新；失败时从服务端重新读取以回滚界面。
+async function settingsSaveDone(ok) {
+  if (!ok) await loadSettings();
+  await loadAuth();
+  if (!ok && lastSettingsUnauthorized) showLoginGate();
 }
 
 // applySettings 界面上点「应用」时保存代理设置。
@@ -935,7 +1045,14 @@ async function loadAuth() {
   try {
     authState = await (await fetch("/api/auth")).json();
   } catch (e) {
-    authState = { db_enabled: false, db_available: false, needs_setup: false, logged_in: false };
+    authState = {
+      db_enabled: false,
+      db_available: false,
+      needs_setup: false,
+      logged_in: false,
+      require_login: false,
+      allow_register: false,
+    };
   }
   applyAuth();
   return authState;
@@ -945,45 +1062,91 @@ async function loadAuth() {
 function applyAuth() {
   $("dbGrp").style.display = authState.db_available ? "" : "none";
   $("dbEnabled").checked = !!authState.db_enabled;
-  $("accountChip").style.display = authState.logged_in ? "" : "none";
+  $("accountChip").style.display = authState.db_available ? "" : "none";
+  $("accountBtn").style.display = authState.logged_in ? "" : "none";
+  $("logoutBtn").style.display = authState.logged_in ? "" : "none";
+  // 数据库记录关闭时不要求也不支持登录，避免出现“登录成功但没有会话”的假入口
+  $("loginBtn").style.display = authState.db_enabled && !authState.logged_in ? "" : "none";
 
-  const needGate = authState.db_enabled && (authState.needs_setup || !authState.logged_in);
-  if (needGate) {
+  $("requireLogin").checked = !!authState.require_login;
+  $("allowRegister").checked = !!authState.allow_register;
+  // 只有已登录用户，或还没有任何账号的全新系统，才允许修改安全设置。
+  const canChangeSecurity = !!authState.logged_in || !!authState.needs_setup;
+  $("requireLogin").disabled = !canChangeSecurity;
+  $("allowRegister").disabled = !canChangeSecurity;
+
+  if (gateForced()) {
     showGate(authState.needs_setup ? "setup" : "login");
   } else {
     $("gate").classList.remove("open");
   }
 }
 
-// showGate 显示登录/首次设置/修改账号面板。
+// gateForced 表示登录遮罩是否必须显示：数据库启用登录要求，且尚未设置账号或未登录。
+function gateForced() {
+  return authState.db_enabled && authState.require_login && (authState.needs_setup || !authState.logged_in);
+}
+
+// showGate 显示登录/首次设置/注册/修改账号面板。
 function showGate(mode) {
   gateMode = mode;
   const texts = {
-    login:  { title: "登录", sub: "该服务已开启检索记录，检索需要登录。", submit: "登录", confirm: false },
-    setup:  { title: "首次设置登录账号", sub: "服务已开启检索记录。请先设置一个账号，之后检索需要登录。", submit: "设置并登录", confirm: true },
-    change: { title: "修改账号密码", sub: "留空密码则只改用户名；修改后立即生效。", submit: "保存", confirm: true },
+    login:    { title: "登录", sub: "登录后可记录检索历史，并管理账号与安全设置。", submit: "登录", confirm: false },
+    setup:    { title: "首次设置登录账号", sub: "服务已开启数据库记录。请先设置一个账号，之后可以用它登录并管理设置。", submit: "设置并登录", confirm: true },
+    register: { title: "注册账号", sub: "注册并登录后即可使用该服务，账号信息会保存到数据库。", submit: "注册并登录", confirm: true },
+    change:   { title: "修改账号密码", sub: "留空密码则只改用户名；修改后立即生效。", submit: "保存", confirm: true },
   };
   const t = texts[mode] || texts.login;
   $("gateTitle").textContent = t.title;
   $("gateSub").textContent = t.sub;
   $("gateSubmit").textContent = t.submit;
   $("gateConfirmWrap").style.display = t.confirm ? "" : "none";
+  // 修改账号时密码可以留空表示保持原密码，因此动态取消 HTML 必填约束。
+  $("gatePass").required = mode !== "change";
+  $("gatePass").autocomplete = mode === "login" ? "current-password" : "new-password";
   $("gateErr").textContent = "";
-  $("gateFoot").style.display = mode === "change" && authState.logged_in ? "" : "none";
+  // 强制登录时不允许关闭；主动点开的登录/设置/注册面板可以取消。
+  $("gateFoot").style.display = mode === "change" || !gateForced() ? "" : "none";
+  $("gateRegisterWrap").style.display = mode === "login" && authState.allow_register ? "" : "none";
+  $("gateLoginWrap").style.display = mode === "register" ? "" : "none";
   $("gateLogout").textContent = "取消";
   $("gate").classList.add("open");
   setTimeout(() => $("gateUser").focus(), 60);
+}
+
+// showLoginGate 在认证失效后重新显示登录面板；全新系统则显示首次设置。
+// 数据库记录关闭时不要求登录，因此不显示无法完成登录的遮罩。
+function showLoginGate() {
+  if (!authState.db_enabled) return;
+  showGate(authState.needs_setup ? "setup" : "login");
 }
 
 $("gateForm").onsubmit = async (e) => {
   e.preventDefault();
   const username = $("gateUser").value.trim();
   const password = $("gatePass").value;
-  if (gateMode !== "login" && password !== $("gatePass2").value) {
-    $("gateErr").textContent = "两次输入的密码不一致";
+  const password2 = $("gatePass2").value;
+  if (!username) {
+    $("gateErr").textContent = "请输入用户名";
     return;
   }
-  const url = gateMode === "login" ? "/api/login" : "/api/account";
+  if (gateMode === "change") {
+    // 修改账号时密码留空表示保持原密码；只有输入了新密码才校验确认密码。
+    if ((password || password2) && password !== password2) {
+      $("gateErr").textContent = "两次输入的密码不一致";
+      return;
+    }
+  } else if (gateMode !== "login") {
+    if (!password) {
+      $("gateErr").textContent = "请输入密码";
+      return;
+    }
+    if (password !== password2) {
+      $("gateErr").textContent = "两次输入的密码不一致";
+      return;
+    }
+  }
+  const url = gateMode === "login" ? "/api/login" : gateMode === "register" ? "/api/register" : "/api/account";
   $("gateSubmit").disabled = true;
   try {
     const resp = await fetch(url, {
@@ -997,7 +1160,7 @@ $("gateForm").onsubmit = async (e) => {
     $("gatePass2").value = "";
     $("gate").classList.remove("open");
     await loadAuth();
-    toast(gateMode === "login" ? "已登录" : "账号已保存");
+    toast(gateMode === "login" ? "已登录" : gateMode === "register" ? "注册成功" : "账号已保存");
   } catch (err) {
     $("gateErr").textContent = err.message || String(err);
   } finally {
@@ -1013,10 +1176,39 @@ $("accountBtn").onclick = () => {
   showGate("change");
 };
 
+// 未登录时的登录入口：没有账号则直接进入首次设置。
+$("loginBtn").onclick = () => {
+  $("gateUser").value = "";
+  $("gatePass").value = "";
+  $("gatePass2").value = "";
+  showGate(authState.needs_setup ? "setup" : "login");
+};
+
+// 退出登录：清掉会话后重新读取认证状态。
+$("logoutBtn").onclick = async () => {
+  await fetch("/api/logout", { method: "POST" });
+  await loadAuth();
+  toast("已退出登录");
+};
+
+// 登录面板里的注册入口，以及注册面板返回登录。
+$("gateRegister").onclick = (e) => {
+  e.preventDefault();
+  $("gatePass").value = "";
+  $("gatePass2").value = "";
+  $("gateErr").textContent = "";
+  showGate("register");
+};
+$("gateLoginBack").onclick = (e) => {
+  e.preventDefault();
+  $("gateErr").textContent = "";
+  showGate("login");
+};
+
 // 取消（仅修改账号时）/ 退出登录
 $("gateLogout").onclick = async (e) => {
   e.preventDefault();
-  if (gateMode === "change") {
+  if (gateMode === "change" || !gateForced()) {
     $("gate").classList.remove("open");
     return;
   }
@@ -1040,23 +1232,113 @@ $("filtersToggle").onclick = () => {
 };
 
 $("dbEnabled").onchange = async () => {
-  await saveSettings($("dbEnabled").checked);
-  await loadAuth();
+  await settingsSaveDone(await saveSettings($("dbEnabled").checked));
 };
+
+// 安全开关：保存成功后刷新认证状态；失败时从服务端重新读取以回滚界面。
+async function onSecurityChange() {
+  await settingsSaveDone(await saveSettings());
+}
+$("requireLogin").onchange = onSecurityChange;
+$("allowRegister").onchange = onSecurityChange;
 
 // 关闭详情（手机上抽屉铺满整屏，点遮罩点不到，必须有关闭按钮）
 $("dClose").onclick = closeDetail;
 
+/* ---------- 筛选提示：固定定位并自动避开视口边缘 ---------- */
+const tipBubble = $("tipBubble");
+let tipTarget = null;
+
+function showTip(el) {
+  const text = el.dataset.tip;
+  if (!text) return;
+  tipTarget = el;
+  tipBubble.textContent = text;
+  tipBubble.hidden = false;
+  tipBubble.classList.remove("open");
+
+  // 先量出实际尺寸，再把气泡收敛到视口内，避免手机上溢出屏幕
+  const margin = 12;
+  const gap = 8;
+  const vw = document.documentElement.clientWidth;
+  const vh = document.documentElement.clientHeight;
+  const rect = el.getBoundingClientRect();
+  const bw = Math.min(tipBubble.offsetWidth, vw - margin * 2);
+  const bh = tipBubble.offsetHeight;
+  const left = Math.min(Math.max(margin, rect.left), Math.max(margin, vw - bw - margin));
+  let top = rect.bottom + gap;
+  if (top + bh > vh - margin) {
+    const above = rect.top - gap - bh;
+    top = above >= margin ? above : Math.max(margin, vh - bh - margin);
+  }
+  tipBubble.style.left = `${Math.round(left)}px`;
+  tipBubble.style.top = `${Math.round(top)}px`;
+  tipBubble.classList.add("open");
+}
+
+function hideTip() {
+  tipBubble.classList.remove("open");
+  tipBubble.hidden = true;
+  tipTarget = null;
+}
+
+function toggleTip(el) {
+  if (tipTarget === el && tipBubble.classList.contains("open")) hideTip();
+  else showTip(el);
+}
+
+const canHover = window.matchMedia("(hover: hover)");
+
+document.querySelectorAll(".tip").forEach((el) => {
+  el.tabIndex = 0;
+  el.addEventListener("pointerenter", (e) => {
+    if (e.pointerType !== "touch") showTip(el);
+  });
+  el.addEventListener("pointerleave", (e) => {
+    if (e.pointerType !== "touch") hideTip();
+  });
+  // 触屏点按时浏览器会先聚焦再触发 click，这里不能让聚焦把 click 的切换抵消掉
+  el.addEventListener("focus", () => { if (canHover.matches) showTip(el); });
+  el.addEventListener("blur", () => { if (canHover.matches) hideTip(); });
+  el.addEventListener("click", (e) => {
+    // 触屏没有 hover，点一下展开、再点收起；桌面端交给悬停
+    if (canHover.matches) return;
+    e.preventDefault();
+    toggleTip(el);
+  });
+  el.addEventListener("keydown", (e) => {
+    if (e.key !== "Enter" && e.key !== " ") return;
+    e.preventDefault();
+    toggleTip(el);
+  });
+});
+
+document.addEventListener("click", (e) => {
+  const target = e.target instanceof Element ? e.target : null;
+  if (!target || !target.closest(".tip")) hideTip();
+});
+document.addEventListener("scroll", hideTip, true);
+window.addEventListener("resize", hideTip);
+window.addEventListener("orientationchange", hideTip);
+
 /* ---------- 事件绑定 ---------- */
 $("go").onclick = () => search(1);
-$("perPage").onchange = () => { savePrefs(); search(1); };
+$("perPage").onchange = () => {
+  savePrefs();
+  if (searchState) {
+    searchState.params.set("per_page", $("perPage").value || "20");
+    search(1, true);
+  } else {
+    search(1);
+  }
+};
 $("applyProxy").onclick = applySettings;
 $("healthBtn").onclick = checkHealth;
 $("mask").onclick = closeDetail;
 $("q").addEventListener("keydown", (e) => { if (e.key === "Enter") search(1); });
 
 document.addEventListener("keydown", (e) => {
-  if (e.key === "Escape") { closeDetail(); return; }
+  if (e.key === "Escape") { closeDetail(); hideTip(); return; }
   // 正在输入框里打字时不抢焦点，否则代理地址之类的没法直接敲
   const el = document.activeElement;
   const tag = el ? el.tagName : "";
