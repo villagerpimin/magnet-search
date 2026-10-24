@@ -31,6 +31,7 @@ serve 的全部配置（监听地址、代理、数据库、账号、检索默�
   --per-cluster n      同一聚类最多输出几条（默认 2）
   --cluster-key mode   聚类粒度：resolution|full|none
   --no-probe           只用引擎元数据，不做 tracker/DHT 探测
+  --no-split           只按完整查询检索，不拆成独立关键词
 
 网络选项:
   --proxy url[,url]    全局代理，可多个，按顺序回退

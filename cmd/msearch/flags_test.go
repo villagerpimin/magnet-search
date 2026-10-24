@@ -3,6 +3,8 @@ package main
 import (
 	"strings"
 	"testing"
+
+	"github.com/pigzhu/magnet-search/internal/app"
 )
 
 // TestParseArgsPropagatesQuery 校验位置参数会被传进检索流水线的查询词。
@@ -65,5 +67,30 @@ func TestParseArgsAccumulatesRepeatedFlags(t *testing.T) {
 	}
 	if len(opts.app.Proxy) != 2 {
 		t.Errorf("代理列表 = %v，期望两个", opts.app.Proxy)
+	}
+}
+
+// TestParseArgsSplitQuery 校验拆词检索默认开启，--no-split 可以关闭。
+func TestParseArgsSplitQuery(t *testing.T) {
+	opts, err := parseArgs([]string{"deepseek", "harness"})
+	if err != nil {
+		t.Fatalf("解析参数失败: %v", err)
+	}
+	if !opts.app.SplitQuery {
+		t.Error("拆词检索默认应开启")
+	}
+	if opts.app.MaxQueryTerms != app.DefaultMaxQueryTerms {
+		t.Errorf("MaxQueryTerms = %d，期望默认值 %d", opts.app.MaxQueryTerms, app.DefaultMaxQueryTerms)
+	}
+
+	opts, err = parseArgs([]string{"--no-split", "deepseek", "harness"})
+	if err != nil {
+		t.Fatalf("解析参数失败: %v", err)
+	}
+	if opts.app.SplitQuery {
+		t.Error("--no-split 之后拆词检索应关闭")
+	}
+	if opts.app.Query != "deepseek harness" {
+		t.Errorf("--no-split 不应吞掉位置参数，实际查询 %q", opts.app.Query)
 	}
 }

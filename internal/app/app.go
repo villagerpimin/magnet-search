@@ -54,6 +54,10 @@ type Options struct {
 	EngineTimeout time.Duration
 	// Retries 单次请求重试次数
 	Retries int
+	// SplitQuery 是否把查询拆成独立关键词分别检索
+	SplitQuery bool
+	// MaxQueryTerms 拆词检索时最多使用几个关键词，0 表示使用默认值
+	MaxQueryTerms int
 }
 
 // Outcome 是一次检索的结果汇总。
@@ -86,6 +90,8 @@ const (
 	DefaultRareMaxPeers = 4
 	// DefaultPerCluster 每个聚类默认最多输出条数
 	DefaultPerCluster = 2
+	// DefaultMaxQueryTerms 拆词检索默认最多使用几个关键词
+	DefaultMaxQueryTerms = 4
 )
 
 // 代理作用范围。
@@ -128,6 +134,9 @@ func (o *Options) withDefaults() {
 	if o.Retries < 0 {
 		o.Retries = 0
 	}
+	if o.MaxQueryTerms <= 0 {
+		o.MaxQueryTerms = DefaultMaxQueryTerms
+	}
 }
 
 // Search 执行一次完整检索。
@@ -154,12 +163,16 @@ func Search(ctx context.Context, opts Options) (*Outcome, error) {
 		return nil, fmt.Errorf("没有可用引擎")
 	}
 
-	res := engine.Search(ctx, engines, engine.Options{
+	variants := []string{opts.Query}
+	if opts.SplitQuery {
+		variants = aggregate.QueryVariants(opts.Query, opts.MaxQueryTerms)
+	}
+	res := engine.SearchVariants(ctx, engines, engine.Options{
 		Query:    opts.Query,
 		Limit:    opts.PerEngineLimit,
 		Category: opts.Category,
 		Timeout:  opts.EngineTimeout,
-	})
+	}, variants, nil)
 
 	cands := aggregate.Merge(res.Results)
 
@@ -256,12 +269,16 @@ func SearchStream(ctx context.Context, opts Options, emit func(Event)) (*Outcome
 		minPeers:      opts.MinPeers,
 		minConfidence: opts.MinConfidence,
 	}
-	res := engine.SearchStream(ctx, engines, engine.Options{
+	variants := []string{opts.Query}
+	if opts.SplitQuery {
+		variants = aggregate.QueryVariants(opts.Query, opts.MaxQueryTerms)
+	}
+	res := engine.SearchVariants(ctx, engines, engine.Options{
 		Query:    opts.Query,
 		Limit:    opts.PerEngineLimit,
 		Category: opts.Category,
 		Timeout:  opts.EngineTimeout,
-	}, func(name string, results []model.Result, searchErr error) {
+	}, variants, func(name string, results []model.Result, searchErr error) {
 		if searchErr != nil {
 			emit(Event{Kind: EventEngine, Engine: name, Err: searchErr.Error()})
 			return

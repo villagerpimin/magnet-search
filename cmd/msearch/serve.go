@@ -69,14 +69,32 @@ func runServe(args []string) int {
 
 	// 连接数据库；失败时降级为"不启用数据库"，服务仍然可用
 	var st *store.Store
+	dbSettings := store.AppSettings{
+		RequireLogin:  cfg.Database.RequireLogin,
+		AllowRegister: cfg.Database.AllowRegister,
+	}
 	if cfg.DatabaseEnabled() {
-		opened, err := store.Open(ctx, store.Config{DSN: cfg.Database.DSN})
+		opened, err := store.Open(ctx, store.Config{
+			DSN:      cfg.Database.DSN,
+			Host:     cfg.Database.Host,
+			Port:     cfg.Database.Port,
+			Username: cfg.Database.Username,
+			Password: cfg.Database.Password,
+			Database: cfg.Database.Name,
+		})
 		if err != nil {
 			fmt.Fprintln(os.Stderr, "警告：数据库不可用，已按未启用数据库运行：", err)
 		} else {
 			st = opened
 			defer st.Close()
 			fmt.Println("数据库：已连接")
+			// 配置里的开关只作为首次写入的默认值，之后以库里的设置为准
+			loaded, err := st.Settings(ctx, dbSettings)
+			if err != nil {
+				fmt.Fprintln(os.Stderr, "警告：读取数据库设置失败，使用配置默认值：", err)
+			} else {
+				dbSettings = loaded
+			}
 		}
 	} else {
 		fmt.Println("数据库：未启用（不记录检索、不需要登录）")
@@ -91,11 +109,14 @@ func runServe(args []string) int {
 		}
 	}
 
-	srv := server.New(cfg.Options(), st)
+	srv := server.New(cfg.Options(), st, dbSettings)
 	fmt.Printf("配置文件：%s\n", path)
 	fmt.Printf("磁力聚合搜索界面已启动： http://%s\n", cfg.Addr)
 	fmt.Printf("代理： %v（作用范围 %s）\n", cfg.Proxy, cfg.ProxyScope)
 	fmt.Printf("引擎： %v\n", cfg.Engines)
+	if st != nil {
+		fmt.Printf("登录要求：%s；账号注册：%s\n", onOff(dbSettings.RequireLogin), onOff(dbSettings.AllowRegister))
+	}
 	if !isLoopbackAddr(cfg.Addr) {
 		fmt.Println("提示：监听地址不是本机回环，服务会对网络上的其他主机开放，请自行确认访问控制。")
 	}
@@ -117,7 +138,7 @@ func setAccount(ctx context.Context, st *store.Store, username, password string)
 	if err != nil {
 		return err
 	}
-	return st.SetAccount(ctx, username, hash)
+	return st.UpsertUser(ctx, username, hash)
 }
 
 // runCheck 逐个测试引擎在当前网络下的可用性。
@@ -202,6 +223,14 @@ func runEngines() int {
 		fmt.Printf("%-14s %-10s %s\n", s.Name, s.Region, s.Description)
 	}
 	return 0
+}
+
+// onOff 把布尔开关转成启动信息里的中文状态。
+func onOff(v bool) string {
+	if v {
+		return "开启"
+	}
+	return "关闭"
 }
 
 // isLoopbackAddr 判断监听地址是否只对本机开放。

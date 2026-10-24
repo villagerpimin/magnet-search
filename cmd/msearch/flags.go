@@ -12,6 +12,7 @@ import (
 // boolFlags 是不接受参数的开关，解析时不会吞掉后面的位置参数。
 var boolFlags = map[string]bool{
 	"verbose": true, "json": true, "quiet": true, "no-color": true, "no-probe": true,
+	"no-split": true,
 }
 
 // cliOptions 是命令行解析结果。
@@ -39,6 +40,8 @@ func defaultAppOptions() app.Options {
 		PerCluster:    app.DefaultPerCluster,
 		ClusterKey:    "resolution",
 		Probe:         true,
+		SplitQuery:    true,
+		MaxQueryTerms: app.DefaultMaxQueryTerms,
 		Timeout:       15 * time.Second,
 		EngineTimeout: 15 * time.Second,
 		Retries:       2,
@@ -152,6 +155,8 @@ func parseArgs(args []string) (*cliOptions, error) {
 			opts.app.ClusterKey = value
 		case "no-probe":
 			opts.app.Probe = false
+		case "no-split":
+			opts.app.SplitQuery = false
 		case "proxy":
 			// 允许重复指定，累加而不是覆盖
 			opts.app.Proxy = append(opts.app.Proxy, splitList(value)...)
