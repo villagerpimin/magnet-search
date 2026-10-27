@@ -97,6 +97,9 @@ func (s *Server) handleSearchStream(w http.ResponseWriter, r *http.Request) {
 	// 同一组参数的检索结果已经缓存时直接返回，避免翻页或换每页条数时重跑网络检索
 	key := searchCacheKey(opts)
 	if out, ok := s.cache.get(key); ok {
+		if page == 1 {
+			s.recordHistory(r, opts.Query)
+		}
 		sse.send("done", buildSearchResponse(out, perPage, page, time.Now()))
 		return
 	}
@@ -127,10 +130,11 @@ func (s *Server) handleSearchStream(w http.ResponseWriter, r *http.Request) {
 		s.cache.put(key, out)
 	}
 
-	// 全部引擎结束并完成存活探测后，给出最终的排序与分页信息
+	// 全部引擎结束并完成存活探测后，给出最终的排序与分页信息。
+	// 先记录检索再发 done，前端收到 done 后立刻刷新搜索历史时才能读到这一条。
 	final := buildSearchResponse(out, perPage, page, time.Now())
-	sse.send("done", final)
 	s.logSearch(r, opts, len(out.Results), out.Elapsed)
+	sse.send("done", final)
 }
 
 // engineStatus 是单个引擎的自检状态。

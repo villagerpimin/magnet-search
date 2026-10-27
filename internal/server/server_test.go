@@ -431,38 +431,137 @@ func TestRequireAuthHonorsLoginSwitch(t *testing.T) {
 	}
 }
 
-// TestSettingsNeedsAuth 校验安全设置变更与关闭数据库记录的登录要求。
-func TestSettingsNeedsAuth(t *testing.T) {
-	requireLogin := Settings{DBEnabled: true, RequireLogin: true, AllowRegister: false}
-	openSearch := Settings{DBEnabled: true, RequireLogin: false, AllowRegister: false}
-
-	cases := []struct {
-		name  string
-		cur   Settings
-		next  Settings
-		users int
-		want  bool
-	}{
-		{"没有账号时无需登录", requireLogin, Settings{DBEnabled: true, RequireLogin: false}, 0, false},
-		{"修改登录开关需要登录", requireLogin, Settings{DBEnabled: true, RequireLogin: false}, 1, true},
-		{"修改注册开关需要登录", requireLogin, Settings{DBEnabled: true, RequireLogin: true, AllowRegister: true}, 1, true},
-		{"要求登录时关闭数据库需要登录", requireLogin, Settings{DBEnabled: false, RequireLogin: true}, 1, true},
-		{"不要求登录时关闭数据库无需登录", openSearch, Settings{DBEnabled: false, RequireLogin: false}, 1, false},
-		{"只改代理无需登录", requireLogin, Settings{DBEnabled: true, RequireLogin: true, Proxy: "http://127.0.0.1:7890"}, 1, false},
-	}
-	for _, c := range cases {
-		t.Run(c.name, func(t *testing.T) {
-			if got := settingsNeedsAuth(c.cur, c.next, c.users); got != c.want {
-				t.Errorf("settingsNeedsAuth = %v，期望 %v", got, c.want)
-			}
-		})
-	}
-}
-
 // min 返回两个数里较小的。
 func min(a, b int) int {
 	if a < b {
 		return a
 	}
 	return b
+}
+
+// TestSettingsSecurityFlagsReadOnly 校验数据库与安全开关不能通过 Web 接口修改。
+func TestSettingsSecurityFlagsReadOnly(t *testing.T) {
+	srv := New(app.Options{}, &store.Store{}, store.AppSettings{RequireLogin: true, AllowRegister: true})
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+
+	body := strings.NewReader(`{"proxy":"http://127.0.0.1:7890","db_enabled":false,"require_login":false,"allow_register":false}`)
+	resp, err := http.Post(ts.URL+"/api/settings", "application/json", body)
+	if err != nil {
+		t.Fatalf("保存设置失败: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("保存设置状态码 = %d，期望 200", resp.StatusCode)
+	}
+	var got Settings
+	if err := json.NewDecoder(resp.Body).Decode(&got); err != nil {
+		t.Fatalf("解析设置失败: %v", err)
+	}
+	if got.Proxy != "http://127.0.0.1:7890" {
+		t.Errorf("代理 = %q，期望已保存", got.Proxy)
+	}
+	// 安全开关不再出现在 /api/settings 的响应里，直接检查服务端内存状态。
+	srv.settingsMu.RLock()
+	stored := srv.settings
+	srv.settingsMu.RUnlock()
+	if !stored.DBEnabled || !stored.RequireLogin || !stored.AllowRegister {
+		t.Errorf("安全开关应保持启动时的值，实际 %+v", stored)
+	}
+}
+
+// TestHistoryAPINoStore 校验未启用数据库时搜索历史接口返回空列表。
+func TestHistoryAPINoStore(t *testing.T) {
+	ts := newTestServer()
+	defer ts.Close()
+
+	resp, err := http.Get(ts.URL + "/api/history")
+	if err != nil {
+		t.Fatalf("读取历史失败: %v", err)
+	}
+	defer resp.Body.Close()
+	var got historyResponse
+	if err := json.NewDecoder(resp.Body).Decode(&got); err != nil {
+		t.Fatalf("解析历史失败: %v", err)
+	}
+	if got.DBEnabled || len(got.Items) != 0 {
+		t.Errorf("无数据库历史 = %+v，期望空列表", got)
+	}
+
+	req, _ := http.NewRequest(http.MethodDelete, ts.URL+"/api/history?query=ubuntu", nil)
+	delResp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("删除历史失败: %v", err)
+	}
+	defer delResp.Body.Close()
+	if delResp.StatusCode != http.StatusBadRequest {
+		t.Errorf("无数据库删除历史状态码 = %d，期望 400", delResp.StatusCode)
+	}
+}
+
+// TestFavoritesAPINoStore 校验未启用数据库时收藏接口的行为。
+func TestFavoritesAPINoStore(t *testing.T) {
+	ts := newTestServer()
+	defer ts.Close()
+
+	resp, err := http.Get(ts.URL + "/api/favorites")
+	if err != nil {
+		t.Fatalf("读取收藏失败: %v", err)
+	}
+	defer resp.Body.Close()
+	var got favoritesResponse
+	if err := json.NewDecoder(resp.Body).Decode(&got); err != nil {
+		t.Fatalf("解析收藏失败: %v", err)
+	}
+	if got.DBEnabled || len(got.Items) != 0 {
+		t.Errorf("无数据库收藏 = %+v，期望空列表", got)
+	}
+
+	body := strings.NewReader(`{"info_hash":"232cd67eb3ffbd7c37bf9ec3ee887417e5ae1ee6","title":"x"}`)
+	postResp, err := http.Post(ts.URL+"/api/favorites", "application/json", body)
+	if err != nil {
+		t.Fatalf("新增收藏失败: %v", err)
+	}
+	defer postResp.Body.Close()
+	if postResp.StatusCode != http.StatusBadRequest {
+		t.Errorf("无数据库新增收藏状态码 = %d，期望 400", postResp.StatusCode)
+	}
+}
+
+// TestFilesAPIRejectsBadHash 校验文件列表接口在请求参数非法时不发网络请求。
+func TestFilesAPIRejectsBadHash(t *testing.T) {
+	ts := newTestServer()
+	defer ts.Close()
+
+	for _, path := range []string{"/api/files", "/api/files?hash=bad", "/api/files?hash=0000000000000000000000000000000000000000"} {
+		resp, err := http.Get(ts.URL + path)
+		if err != nil {
+			t.Fatalf("请求 %s 失败: %v", path, err)
+		}
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusBadRequest {
+			t.Errorf("%s 状态码 = %d，期望 400", path, resp.StatusCode)
+		}
+	}
+}
+
+// TestSessionIdentityCarriesUserID 校验会话里同时携带账号 ID 与用户名。
+func TestSessionIdentityCarriesUserID(t *testing.T) {
+	srv := New(app.Options{}, nil, store.AppSettings{})
+	rec := httptest.NewRecorder()
+	srv.setSession(rec, 42, "alice")
+
+	cookies := rec.Result().Cookies()
+	if len(cookies) != 1 {
+		t.Fatalf("期望 1 个会话 cookie，实际 %d 个", len(cookies))
+	}
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.AddCookie(cookies[0])
+	identity, ok := srv.sessionIdentity(req)
+	if !ok {
+		t.Fatal("会话校验失败")
+	}
+	if identity.UserID != 42 || identity.Username != "alice" {
+		t.Errorf("会话身份 = %+v，期望 42/alice", identity)
+	}
 }

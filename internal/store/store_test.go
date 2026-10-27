@@ -24,7 +24,7 @@ func openTestStore(t *testing.T) *Store {
 		t.Fatalf("连接测试库失败: %v", err)
 	}
 	t.Cleanup(func() { st.Close() })
-	for _, table := range []string{"search_log", "app_user", "app_setting"} {
+	for _, table := range []string{"search_log", "search_history", "app_favorite", "app_user", "app_setting"} {
 		if _, err := st.db.ExecContext(ctx, "TRUNCATE TABLE "+table); err != nil {
 			t.Fatalf("清空 %s 失败: %v", table, err)
 		}
@@ -84,6 +84,7 @@ func TestLogSearchRoundTrip(t *testing.T) {
 	ctx := context.Background()
 
 	entry := SearchLog{
+		UserID:      7,
 		Query:       "葬送的芙莉莲",
 		IP:          "203.0.113.7",
 		UserAgent:   "Mozilla/5.0 test",
@@ -103,7 +104,7 @@ func TestLogSearchRoundTrip(t *testing.T) {
 		t.Fatalf("期望 1 条记录，实际 %d 条", len(got))
 	}
 	r := got[0]
-	if r.Query != entry.Query || r.IP != entry.IP || r.Engines != entry.Engines {
+	if r.UserID != entry.UserID || r.Query != entry.Query || r.IP != entry.IP || r.Engines != entry.Engines {
 		t.Errorf("记录内容不符: %+v", r)
 	}
 	if r.ResultCount != entry.ResultCount || r.ElapsedMS != entry.ElapsedMS {
@@ -267,5 +268,117 @@ func TestLogSearchTruncatesLongQuery(t *testing.T) {
 	}
 	if len([]rune(got[0].Query)) > 512 {
 		t.Errorf("关键词未被截断: %d 字", len([]rune(got[0].Query)))
+	}
+}
+
+// TestHistoryRoundTrip 校验搜索历史的去重、账号隔离与删除。
+func TestHistoryRoundTrip(t *testing.T) {
+	st := openTestStore(t)
+	ctx := context.Background()
+
+	for _, query := range []string{"Ubuntu", "ubuntu", "葬送的芙莉莲"} {
+		if err := st.AddHistory(ctx, 1, query); err != nil {
+			t.Fatalf("写入历史失败: %v", err)
+		}
+	}
+	if err := st.AddHistory(ctx, 2, "matrix"); err != nil {
+		t.Fatalf("写入另一个账号的历史失败: %v", err)
+	}
+
+	got, err := st.History(ctx, 1, 10)
+	if err != nil {
+		t.Fatalf("读取历史失败: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("大小写不同的同一关键词应去重，实际 %d 条: %+v", len(got), got)
+	}
+	if got[0].Query != "葬送的芙莉莲" {
+		t.Errorf("最近一条历史 = %q，期望葬送的芙莉莲", got[0].Query)
+	}
+	other, err := st.History(ctx, 2, 10)
+	if err != nil || len(other) != 1 || other[0].Query != "matrix" {
+		t.Errorf("另一个账号的历史 = %+v err=%v", other, err)
+	}
+
+	removed, err := st.DeleteHistory(ctx, 1, "ubuntu")
+	if err != nil || !removed {
+		t.Fatalf("删除历史失败: removed=%v err=%v", removed, err)
+	}
+	got, _ = st.History(ctx, 1, 10)
+	if len(got) != 1 {
+		t.Errorf("删除后应只剩 1 条，实际 %d 条", len(got))
+	}
+	if err := st.ClearHistory(ctx, 1); err != nil {
+		t.Fatalf("清空历史失败: %v", err)
+	}
+	got, _ = st.History(ctx, 1, 10)
+	if len(got) != 0 {
+		t.Errorf("清空后仍有 %d 条历史", len(got))
+	}
+}
+
+// TestFavoriteLifecycle 校验收藏的新增、去重更新、修改与删除。
+func TestFavoriteLifecycle(t *testing.T) {
+	st := openTestStore(t)
+	ctx := context.Background()
+
+	f := Favorite{
+		UserID:    1,
+		InfoHash:  "232cd67eb3ffbd7c37bf9ec3ee887417e5ae1ee6",
+		Title:     "Ubuntu Linux Bible",
+		Magnet:    "magnet:?xt=urn:btih:232cd67eb3ffbd7c37bf9ec3ee887417e5ae1ee6",
+		Size:      "8.2 MB",
+		SizeBytes: 8554738,
+		Seeders:   27,
+		Leechers:  0,
+		Sources:   "torrentscsv",
+		Note:      "先留着",
+	}
+	id, err := st.AddFavorite(ctx, f)
+	if err != nil || id <= 0 {
+		t.Fatalf("新增收藏失败: id=%d err=%v", id, err)
+	}
+	// 同一账号重复收藏应更新元数据并保留备注
+	f.Title = "Ubuntu Linux Bible 11ed"
+	f.Seeders = 30
+	again, err := st.AddFavorite(ctx, f)
+	if err != nil || again != id {
+		t.Fatalf("重复收藏应返回同一 ID: id=%d err=%v", again, err)
+	}
+	saved, err := st.FavoriteByHash(ctx, 1, f.InfoHash)
+	if err != nil {
+		t.Fatalf("读取收藏失败: %v", err)
+	}
+	if saved.Title != f.Title || saved.Seeders != 30 || saved.Note != "先留着" {
+		t.Errorf("重复收藏后的记录 = %+v", saved)
+	}
+	// 另一个账号看不到这条收藏
+	if list, err := st.Favorites(ctx, 2); err != nil || len(list) != 0 {
+		t.Errorf("账号隔离失败: %+v err=%v", list, err)
+	}
+
+	updated, err := st.UpdateFavorite(ctx, 1, id, "新标题", "新备注")
+	if err != nil || !updated {
+		t.Fatalf("修改收藏失败: updated=%v err=%v", updated, err)
+	}
+	saved, _ = st.FavoriteByHash(ctx, 1, f.InfoHash)
+	if saved.Title != "新标题" || saved.Note != "新备注" {
+		t.Errorf("修改后的收藏 = %+v", saved)
+	}
+	// 不属于该账号的 ID 不能修改
+	if updated, err := st.UpdateFavorite(ctx, 2, id, "越权", ""); err != nil || updated {
+		t.Errorf("越权修改应失败: updated=%v err=%v", updated, err)
+	}
+
+	removed, err := st.DeleteFavorite(ctx, 1, id)
+	if err != nil || !removed {
+		t.Fatalf("按 ID 删除失败: removed=%v err=%v", removed, err)
+	}
+	if _, err := st.AddFavorite(ctx, f); err != nil {
+		t.Fatalf("重新收藏失败: %v", err)
+	}
+	removed, err = st.DeleteFavoriteByHash(ctx, 1, f.InfoHash)
+	if err != nil || !removed {
+		t.Fatalf("按哈希删除失败: removed=%v err=%v", removed, err)
 	}
 }

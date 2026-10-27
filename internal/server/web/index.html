@@ -84,7 +84,6 @@ header {
   padding: 12px 2px; font-size: 13px; color: var(--muted);
 }
 .filters .grp { display: flex; align-items: center; gap: 6px; }
-.dbgrp { display: flex; flex-direction: column; gap: 7px; }
 /* 自绘提示：固定定位，脚本按视口边缘收敛位置，手机上也能点开 */
 .tip { cursor: help; }
 .tip .q {
@@ -267,6 +266,64 @@ main { flex: 1; padding: 4px 20px 28px; scroll-margin-top: 64px; }
 .gate-err { color: var(--dead); font-size: 12.5px; min-height: 18px; margin-top: 8px; }
 .gate-foot { margin-top: 6px; font-size: 12.5px; text-align: center; }
 
+/* 搜索历史 */
+.historybar {
+  display: flex; align-items: center; flex-wrap: wrap; gap: 7px;
+  padding: 10px 2px 0; font-size: 12.5px; color: var(--muted);
+}
+.historybar .hlabel { white-space: nowrap; }
+.history-chips { display: flex; flex-wrap: wrap; gap: 6px; min-width: 0; }
+.history-chip {
+  max-width: min(340px, 62vw); padding: 3px 10px; border-radius: 999px;
+  border: 1px solid var(--border); background: var(--panel); color: var(--text);
+  font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  cursor: pointer; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none;
+}
+.history-chip:hover { border-color: var(--accent); }
+.history-chip.pressing { border-color: var(--cold); color: var(--cold); }
+.historybar .clear { white-space: nowrap; }
+
+/* 收藏 */
+.star.on { color: var(--cold); border-color: rgba(210,153,34,.55); }
+.fav-filter {
+  width: 100%; margin: 4px 0 12px; padding: 8px 10px; font: inherit; font-size: 13px;
+  background: var(--panel-2); color: var(--text); border: 1px solid var(--border);
+  border-radius: 8px; outline: none;
+}
+.fav-filter:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-dim); }
+.fav-row {
+  border: 1px solid var(--border); border-radius: 9px; padding: 10px 12px;
+  margin-bottom: 9px; background: var(--panel-2);
+}
+.fav-row .ftitle { font-weight: 550; word-break: break-word; }
+.fav-row .fmeta { color: var(--muted); font-size: 12px; margin-top: 4px; display: flex; flex-wrap: wrap; gap: 3px 10px; }
+.fav-row .fmeta b { color: var(--text); font-weight: 550; }
+.fav-row .fnote { color: var(--cold); font-size: 12px; margin-top: 5px; word-break: break-word; }
+.fav-row .fbtns { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.fav-edit { display: flex; flex-direction: column; gap: 7px; }
+.fav-edit input {
+  width: 100%; padding: 7px 9px; font: inherit; font-size: 13px;
+  background: var(--panel); color: var(--text); border: 1px solid var(--border);
+  border-radius: 7px; outline: none;
+}
+.fav-edit input:focus { border-color: var(--accent); }
+
+/* 文件列表 */
+.files { margin-top: 18px; }
+.files h4 { margin: 0 0 6px; font-size: 13px; font-weight: 600; color: var(--muted); }
+.files .ftotal { color: var(--muted); font-size: 12px; font-weight: 400; }
+.files ul {
+  list-style: none; margin: 8px 0 0; padding: 0; max-height: 320px; overflow-y: auto;
+  border: 1px solid var(--border); border-radius: 8px;
+}
+.files li {
+  display: flex; justify-content: space-between; align-items: baseline; gap: 12px;
+  padding: 6px 9px; font-size: 12px; border-bottom: 1px solid var(--border);
+}
+.files li:last-child { border-bottom: none; }
+.files li .fp { min-width: 0; word-break: break-all; font-family: var(--mono); font-size: 11.5px; }
+.files li .fs { color: var(--muted); white-space: nowrap; }
+
 /* ============ 手机端 ============ */
 @media (max-width: 640px) {
   /* 筛选项在手机上占好几行，先折叠起来，把首屏留给结果 */
@@ -298,6 +355,12 @@ main { flex: 1; padding: 4px 20px 28px; scroll-margin-top: 64px; }
   .filters select, .filters input[type=number] { font-size: 12px; }
   .tip-bubble { max-width: calc(100vw - 24px); max-height: calc(100vh - 24px); font-size: 12.5px; }
   .status { font-size: 11.5px; gap: 6px 10px; padding: 4px 0 10px; }
+
+  .historybar { font-size: 11.5px; padding-top: 8px; }
+  .history-chip { max-width: 100%; font-size: 12px; }
+  .fav-row .fbtns .mini { padding: 6px 12px; font-size: 12.5px; }
+  .files ul { max-height: 45vh; }
+  .files li { font-size: 11.5px; }
 
   /* 结果卡片：状态与按钮折到下一行，标题占满宽度 */
   .card { grid-template-columns: 22px 1fr; gap: 6px 9px; padding: 11px 12px; }
@@ -337,6 +400,7 @@ main { flex: 1; padding: 4px 20px 28px; scroll-margin-top: 64px; }
     <span class="dots" id="healthDots"></span>
     <span id="healthText">引擎状态未知</span>
     <button id="healthBtn" type="button">检测</button>
+    <button id="favBtn" type="button" title="收藏管理" style="display:none">收藏</button>
     <span id="accountChip" style="display:none">
       <button id="loginBtn" type="button" title="登录">登录</button>
       <button id="accountBtn" type="button" title="账号设置">账号</button>
@@ -349,6 +413,11 @@ main { flex: 1; padding: 4px 20px 28px; scroll-margin-top: 64px; }
   <div class="searchbar">
     <input id="q" type="search" placeholder="输入关键词，例如：ubuntu 24.04、葬送のフリーレン、Matrix" autocomplete="off" spellcheck="false">
     <button id="go" type="button">搜索</button>
+  </div>
+  <div class="historybar" id="historyBar" style="display:none">
+    <span class="hlabel">最近搜索</span>
+    <div class="history-chips" id="historyChips"></div>
+    <button class="mini clear" id="historyClear" type="button">清除全部</button>
   </div>
   <button class="filters-toggle" id="filtersToggle" type="button">
     <span id="filtersSummary">筛选</span><span>▾</span>
@@ -397,20 +466,6 @@ main { flex: 1; padding: 4px 20px 28px; scroll-margin-top: 64px; }
     <div class="grp">
       <label class="toggle"><input id="probe" type="checkbox" checked>网络存活探测</label>
     </div>
-    <div class="dbgrp" id="dbGrp" style="display:none">
-      <div class="grp">
-        <label class="tip" data-tip="开启后每一次检索都会写入 MySQL（关键词、时间、来源 IP、结果条数）；是否要求登录由下面的「检索需要登录」开关决定。&#10;&#10;关闭后不记录、也不需要登录。&#10;服务未配置数据库连接时这项不可用。">记录到数据库<span class="q">?</span></label>
-        <label class="toggle"><input id="dbEnabled" type="checkbox">启用</label>
-      </div>
-      <div class="grp">
-        <label class="tip" data-tip="开启后，系统已有账号时检索必须先登录；关闭后任何人都可以直接检索。&#10;&#10;只有已登录用户，或还没有任何账号的全新系统，才能修改这项安全设置。">检索需要登录<span class="q">?</span></label>
-        <label class="toggle"><input id="requireLogin" type="checkbox">启用</label>
-      </div>
-      <div class="grp">
-        <label class="tip" data-tip="开启后，登录界面会显示「还没有账号？注册」入口，允许访客自助注册账号。&#10;&#10;关闭后不显示注册入口；已有账号仍可登录，并在右上角「账号」里修改自己的用户名/密码。">允许注册账号<span class="q">?</span></label>
-        <label class="toggle"><input id="allowRegister" type="checkbox">启用</label>
-      </div>
-    </div>
     <div class="grp">
       <label class="tip" data-tip="代理地址，留空表示不使用。&#10;&#10;服务启动时带的 --proxy 会自动填在这里，之后的检索与自检都按它走。&#10;「仅境外引擎」= 境内与通用引擎直连、境外引擎优先走代理；「全部引擎」= 所有引擎都优先走代理。&#10;可以填多个，用逗号分隔，失败会自动换下一个。">代理<span class="q">?</span></label>
       <input id="proxy" type="text" placeholder="如 http://127.0.0.1:7890，留空=不用" size="30">
@@ -441,15 +496,26 @@ main { flex: 1; padding: 4px 20px 28px; scroll-margin-top: 64px; }
   <div class="copyrow">
     <input id="dMagnet" readonly>
     <button class="mini" id="dCopy" type="button">复制磁力</button>
+    <button class="mini star" id="dFav" type="button">☆ 收藏</button>
   </div>
   <div class="parts" id="dParts"></div>
+  <div class="files" id="dFiles"></div>
   <dl class="kv" id="dKv"></dl>
   <div class="hint" id="dHint"></div>
+</aside>
+<aside class="drawer" id="favDrawer">
+  <div class="drawer-head">
+    <h3>我的收藏</h3>
+    <button class="drawer-close" id="favClose" type="button" aria-label="关闭">✕</button>
+  </div>
+  <input class="fav-filter" id="favFilter" type="search" placeholder="按标题或备注过滤…" autocomplete="off">
+  <div id="favList"></div>
+  <div class="hint">在搜索结果或详情里点「☆ 收藏」即可加入；这里可以复制磁力、按标题搜索、编辑标题与备注、删除收藏。</div>
 </aside>
 <div class="gate" id="gate">
   <form class="gate-card" id="gateForm" autocomplete="on">
     <div class="gate-title" id="gateTitle">登录</div>
-    <div class="gate-sub" id="gateSub">该服务已开启检索记录，检索需要登录。</div>
+    <div class="gate-sub" id="gateSub">登录后可保存搜索历史与收藏。</div>
     <label class="gate-field">
       <span>用户名</span>
       <input id="gateUser" type="text" autocomplete="username" required>
@@ -498,6 +564,12 @@ let authState = {
   allow_register: false,
 };
 let gateMode = "login";
+let historyItems = [];
+let favorites = [];
+let favoriteHashes = new Set();
+let currentDetail = null;
+let editingFavId = 0;
+const fileCache = new Map();
 
 const VERDICT = {
   alive:   { cls: "alive",   text: "活跃" },
@@ -526,6 +598,353 @@ function fmtSize(bytes) {
 
 function escapeHtml(s) {
   return String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+
+function copyToClipboard(text) {
+  navigator.clipboard.writeText(text).then(() => toast("磁力链接已复制")).catch(() => toast("复制失败"));
+}
+
+// attachLongPress 给元素加长按手势：按住 650ms 触发，触发后吞掉随后的 click。
+function attachLongPress(el, onLongPress) {
+  let timer = null;
+  let fired = false;
+  const clear = () => {
+    if (timer) { clearTimeout(timer); timer = null; }
+    el.classList.remove("pressing");
+  };
+  el.addEventListener("pointerdown", (e) => {
+    if (e.pointerType === "mouse" && e.button !== 0) return;
+    fired = false;
+    el.classList.add("pressing");
+    timer = setTimeout(() => {
+      fired = true;
+      el.classList.remove("pressing");
+      onLongPress();
+    }, 650);
+  });
+  el.addEventListener("pointerup", clear);
+  el.addEventListener("pointerleave", clear);
+  el.addEventListener("pointercancel", clear);
+  el.addEventListener("contextmenu", (e) => e.preventDefault());
+  el.addEventListener("click", (e) => {
+    if (!fired) return;
+    e.preventDefault();
+    e.stopImmediatePropagation();
+    fired = false;
+  });
+}
+
+/* ---------- 搜索历史（关联账号，数据库未启用时隐藏） ---------- */
+async function refreshUserData() {
+  await loadHistory();
+  await loadFavorites();
+}
+
+async function loadHistory() {
+  if (!authState.db_enabled) {
+    historyItems = [];
+    renderHistory();
+    return;
+  }
+  try {
+    const data = await (await fetch("/api/history")).json();
+    historyItems = Array.isArray(data.items) ? data.items : [];
+  } catch (e) {
+    historyItems = [];
+  }
+  renderHistory();
+}
+
+function renderHistory() {
+  const bar = $("historyBar");
+  const box = $("historyChips");
+  box.innerHTML = "";
+  const seen = new Set();
+  const items = historyItems.filter((it) => {
+    const key = String(it.query || "").trim().toLowerCase();
+    if (!key || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+  if (!authState.db_enabled || !items.length) {
+    bar.style.display = "none";
+    return;
+  }
+  // 最多展示最近 12 条，避免历史把首屏结果挤下去。
+  items.slice(0, 12).forEach((it) => {
+    const chip = document.createElement("button");
+    chip.type = "button";
+    chip.className = "history-chip";
+    chip.textContent = it.query;
+    chip.title = "点击填入关键词；长按删除";
+    attachLongPress(chip, () => deleteHistory(it.query));
+    chip.addEventListener("click", () => {
+      $("q").value = it.query;
+      $("q").focus();
+      toast("已填入关键词");
+    });
+    box.appendChild(chip);
+  });
+  bar.style.display = "";
+}
+
+async function deleteHistory(query) {
+  try {
+    const resp = await fetch("/api/history?query=" + encodeURIComponent(query), { method: "DELETE" });
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok) throw new Error(data.error || "删除失败");
+    historyItems = historyItems.filter((it) => it.query !== query);
+    renderHistory();
+    toast("已删除该历史");
+  } catch (e) {
+    toast(e.message || "删除失败");
+  }
+}
+
+async function clearHistory() {
+  if (!historyItems.length) return;
+  if (!confirm("确定清空全部搜索历史？")) return;
+  try {
+    const resp = await fetch("/api/history/clear", { method: "POST" });
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok) throw new Error(data.error || "清空失败");
+    historyItems = [];
+    renderHistory();
+    toast("已清空搜索历史");
+  } catch (e) {
+    toast(e.message || "清空失败");
+  }
+}
+
+/* ---------- 收藏 ---------- */
+async function loadFavorites() {
+  if (!authState.db_enabled) {
+    favorites = [];
+    favoriteHashes = new Set();
+    updateStarButtons();
+    renderFavorites();
+    return;
+  }
+  try {
+    const data = await (await fetch("/api/favorites")).json();
+    favorites = Array.isArray(data.items) ? data.items : [];
+  } catch (e) {
+    favorites = [];
+  }
+  favoriteHashes = new Set(favorites.map((f) => f.info_hash));
+  updateStarButtons();
+  renderFavorites();
+}
+
+// updateStarButtons 同步所有已渲染卡片的星标状态。
+function updateStarButtons() {
+  document.querySelectorAll("[data-fav-hash]").forEach((btn) => {
+    const on = favoriteHashes.has(btn.dataset.favHash);
+    btn.textContent = on ? "★ 已收藏" : "☆ 收藏";
+    btn.classList.toggle("on", on);
+  });
+  if (currentDetail) {
+    const on = favoriteHashes.has(currentDetail.info_hash);
+    $("dFav").textContent = on ? "★ 已收藏" : "☆ 收藏";
+    $("dFav").classList.toggle("on", on);
+  }
+}
+
+async function toggleFavorite(r) {
+  if (!authState.db_enabled) {
+    toast("收藏需要启用数据库");
+    return;
+  }
+  const on = favoriteHashes.has(r.info_hash);
+  try {
+    let resp;
+    if (on) {
+      resp = await fetch("/api/favorites?hash=" + encodeURIComponent(r.info_hash), { method: "DELETE" });
+    } else {
+      resp = await fetch("/api/favorites", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          info_hash: r.info_hash,
+          title: r.title,
+          magnet: r.magnet,
+          size: r.size,
+          size_bytes: r.size_bytes,
+          seeders: r.seeders,
+          leechers: r.leechers,
+          sources: r.sources || [],
+        }),
+      });
+    }
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok) throw new Error(data.error || "操作失败");
+    await loadFavorites();
+    toast(on ? "已取消收藏" : "已加入收藏");
+  } catch (e) {
+    toast(e.message || "收藏失败");
+  }
+}
+
+async function openFavDrawer() {
+  if (!authState.db_enabled) {
+    toast("收藏需要启用数据库");
+    return;
+  }
+  closeDetail();
+  $("favFilter").value = "";
+  await loadFavorites();
+  $("favDrawer").classList.add("open");
+  syncMask();
+  $("favFilter").focus();
+}
+
+function closeFavDrawer() {
+  $("favDrawer").classList.remove("open");
+  syncMask();
+}
+
+function renderFavorites() {
+  const box = $("favList");
+  if (!box) return;
+  const filter = ($("favFilter").value || "").trim().toLowerCase();
+  const list = favorites.filter((f) => {
+    if (!filter) return true;
+    return (String(f.title || "") + " " + String(f.note || "")).toLowerCase().includes(filter);
+  });
+  box.innerHTML = "";
+  if (!list.length) {
+    const msg = favorites.length ? "没有匹配的收藏" : "还没有收藏";
+    box.innerHTML = `<div class="empty" style="padding:34px 0"><div class="big">${msg}</div><div>在搜索结果里点 ☆ 即可加入收藏</div></div>`;
+    return;
+  }
+  list.forEach((f) => box.appendChild(buildFavRow(f)));
+}
+
+function buildFavRow(f) {
+  if (editingFavId === f.id) return buildFavEditRow(f);
+  const row = document.createElement("div");
+  row.className = "fav-row";
+  row.innerHTML = `
+    <div class="ftitle"></div>
+    <div class="fmeta">
+      ${f.size ? `<span>大小 <b>${escapeHtml(f.size)}</b></span>` : ""}
+      ${f.seeders >= 0 ? `<span>做种 <b>${f.seeders}</b></span>` : ""}
+      ${(f.sources || []).length ? `<span>${escapeHtml((f.sources || []).join(" · "))}</span>` : ""}
+    </div>
+    ${f.note ? `<div class="fnote"></div>` : ""}
+    <div class="fbtns">
+      <button class="mini" data-act="copy" type="button">复制磁力</button>
+      <button class="mini" data-act="search" type="button">按标题搜索</button>
+      <button class="mini" data-act="edit" type="button">编辑</button>
+      <button class="mini" data-act="del" type="button">删除</button>
+    </div>`;
+  row.querySelector(".ftitle").textContent = f.title;
+  if (f.note) row.querySelector(".fnote").textContent = "备注：" + f.note;
+  row.querySelector('[data-act="copy"]').onclick = () => copyToClipboard(f.magnet);
+  row.querySelector('[data-act="search"]').onclick = () => {
+    $("q").value = f.title;
+    closeFavDrawer();
+    search(1);
+  };
+  row.querySelector('[data-act="edit"]').onclick = () => {
+    editingFavId = f.id;
+    renderFavorites();
+  };
+  row.querySelector('[data-act="del"]').onclick = () => deleteFavorite(f);
+  return row;
+}
+
+function buildFavEditRow(f) {
+  const row = document.createElement("div");
+  row.className = "fav-row";
+  row.innerHTML = `
+    <div class="fav-edit">
+      <input class="edit-title" type="text" placeholder="标题">
+      <input class="edit-note" type="text" placeholder="备注（可选）">
+      <div class="fbtns">
+        <button class="mini" data-act="save" type="button">保存</button>
+        <button class="mini" data-act="cancel" type="button">取消</button>
+      </div>
+    </div>`;
+  const titleInput = row.querySelector(".edit-title");
+  const noteInput = row.querySelector(".edit-note");
+  titleInput.value = f.title;
+  noteInput.value = f.note || "";
+  row.querySelector('[data-act="cancel"]').onclick = () => {
+    editingFavId = 0;
+    renderFavorites();
+  };
+  row.querySelector('[data-act="save"]').onclick = async () => {
+    const title = titleInput.value.trim();
+    if (!title) { toast("标题不能为空"); titleInput.focus(); return; }
+    try {
+      const resp = await fetch("/api/favorites/" + f.id, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title, note: noteInput.value.trim() }),
+      });
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok) throw new Error(data.error || "保存失败");
+      editingFavId = 0;
+      await loadFavorites();
+      toast("收藏已更新");
+    } catch (e) {
+      toast(e.message || "保存失败");
+    }
+  };
+  setTimeout(() => titleInput.focus(), 30);
+  return row;
+}
+
+async function deleteFavorite(f) {
+  if (!confirm(`删除收藏「${f.title}」？`)) return;
+  try {
+    const resp = await fetch("/api/favorites/" + f.id, { method: "DELETE" });
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok) throw new Error(data.error || "删除失败");
+    await loadFavorites();
+    toast("收藏已删除");
+  } catch (e) {
+    toast(e.message || "删除失败");
+  }
+}
+
+/* ---------- 磁力内容（文件列表） ---------- */
+async function loadFiles(hash) {
+  const box = $("dFiles");
+  if (!box) return;
+  if (!hash) { box.innerHTML = ""; return; }
+  if (fileCache.has(hash)) {
+    renderFiles(hash, fileCache.get(hash));
+    return;
+  }
+  box.innerHTML = `<h4>文件列表</h4><div class="ftotal"><span class="spinner"></span> 正在读取磁力内容…</div>`;
+  try {
+    const resp = await fetch("/api/files?hash=" + encodeURIComponent(hash));
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok) throw new Error(data.error || "暂无文件数据");
+    fileCache.set(hash, data);
+    renderFiles(hash, data);
+  } catch (e) {
+    if (currentDetail && currentDetail.info_hash === hash) {
+      box.innerHTML = `<h4>文件列表</h4><div class="ftotal">暂无文件数据（${escapeHtml(e.message || "公共缓存未收录")}）</div>`;
+    }
+  }
+}
+
+function renderFiles(hash, meta) {
+  const box = $("dFiles");
+  if (!box || !currentDetail || currentDetail.info_hash !== hash) return;
+  const files = meta.files || [];
+  const total = meta.total_bytes ? fmtSize(meta.total_bytes) : "-";
+  let html = `<h4>文件列表 <span class="ftotal">共 ${meta.file_count || files.length} 个 · ${total}</span></h4>`;
+  if (!files.length) {
+    box.innerHTML = html + `<div class="ftotal">种子里没有文件信息</div>`;
+    return;
+  }
+  html += `<ul>${files.map((f) => `<li><span class="fp">${escapeHtml(f.path)}</span><span class="fs">${fmtSize(f.size_bytes)}</span></li>`).join("")}</ul>`;
+  if (meta.truncated) html += `<div class="ftotal">文件过多，仅显示前 ${files.length} 个</div>`;
+  box.innerHTML = html;
 }
 
 /* ---------- 偏好设置：引擎选择与每页条数记在浏览器本地 ---------- */
@@ -741,6 +1160,7 @@ function streamSearch(seq) {
       renderStatus(d);
       renderResults(d.results || []);
       renderPager(d);
+      loadHistory();
       resolve();
     });
     es.addEventListener("error", async () => {
@@ -872,14 +1292,24 @@ function buildCard(r) {
       <span class="badge ${v.cls}">${v.text}</span>
       <div class="bar" title="相关度 / 存活证据 / 群体规模 / 新鲜度">${bar}</div>
       <div class="rowbtns">
+        <button class="mini star" data-act="fav" data-fav-hash="${r.info_hash}" type="button">☆ 收藏</button>
         <button class="mini" data-act="copy">复制磁力</button>
         <button class="mini" data-act="detail">详情</button>
       </div>
     </div>`;
   card.querySelector(".title").textContent = r.title;
+  const favBtn = card.querySelector('[data-act="fav"]');
+  if (favoriteHashes.has(r.info_hash)) {
+    favBtn.textContent = "★ 已收藏";
+    favBtn.classList.add("on");
+  }
+  favBtn.onclick = (e) => {
+    e.stopPropagation();
+    toggleFavorite(r);
+  };
   card.querySelector('[data-act="copy"]').onclick = (e) => {
     e.stopPropagation();
-    navigator.clipboard.writeText(r.magnet).then(() => toast("磁力链接已复制")).catch(() => toast("复制失败"));
+    copyToClipboard(r.magnet);
   };
   card.querySelector('[data-act="detail"]').onclick = (e) => { e.stopPropagation(); openDetail(r); };
   card.onclick = () => openDetail(r);
@@ -902,13 +1332,17 @@ function renderResults(items) {
 }
 
 function openDetail(r) {
+  closeFavDrawer();
+  currentDetail = r;
   $("dTitle").textContent = r.title;
   $("dMeta").innerHTML = `<span>大小 <b>${r.size}</b></span><span>对等端 <b>${r.peers}</b></span>
     <span>置信度 <b>${(r.confidence * 100).toFixed(0)}%</b></span><span>总分 <b>${r.score}</b></span>`;
   $("dMagnet").value = r.magnet || "";
-  $("dCopy").onclick = () => {
-    navigator.clipboard.writeText($("dMagnet").value).then(() => toast("磁力链接已复制")).catch(() => toast("复制失败"));
-  };
+  $("dCopy").onclick = () => copyToClipboard($("dMagnet").value);
+  const starred = favoriteHashes.has(r.info_hash);
+  $("dFav").textContent = starred ? "★ 已收藏" : "☆ 收藏";
+  $("dFav").classList.toggle("on", starred);
+  $("dFav").onclick = () => toggleFavorite(r);
   const parts = r.parts || {};
   $("dParts").innerHTML = Object.keys(PART_NAME).map((k) => `
     <div class="row"><span>${PART_NAME[k]}</span>
@@ -923,13 +1357,21 @@ function openDetail(r) {
   ];
   $("dKv").innerHTML = kv.map(([k, v]) => `<dt>${k}</dt><dd>${escapeHtml(String(v))}</dd>`).join("");
   $("dHint").textContent = r.detail_url ? `详情页：${r.detail_url}` : "";
+  loadFiles(r.info_hash);
   $("drawer").classList.add("open");
-  $("mask").classList.add("open");
+  syncMask();
 }
 
 function closeDetail() {
+  currentDetail = null;
   $("drawer").classList.remove("open");
-  $("mask").classList.remove("open");
+  syncMask();
+}
+
+// syncMask 根据抽屉状态统一控制遮罩，避免关掉一个抽屉后另一个还开着却没有遮罩。
+function syncMask() {
+  const open = $("drawer").classList.contains("open") || $("favDrawer").classList.contains("open");
+  $("mask").classList.toggle("open", open);
 }
 
 function renderPager(data) {
@@ -978,28 +1420,19 @@ function renderPager(data) {
   box.appendChild(info);
 }
 
-/* ---------- 设置：代理与安全开关 ---------- */
-let lastSettingsUnauthorized = false;
-
+/* ---------- 设置：只保留代理；数据库与登录开关来自配置或数据库 ---------- */
 async function loadSettings() {
   try {
     const s = await (await fetch("/api/settings")).json();
     $("proxy").value = s.proxy || "";
     $("proxyScope").value = s.proxy_scope === "all" ? "all" : "region";
-    $("dbEnabled").checked = !!s.db_enabled;
-    $("requireLogin").checked = !!s.require_login;
-    $("allowRegister").checked = !!s.allow_register;
   } catch (e) { /* 读不到就保持默认 */ }
 }
 
-async function saveSettings(dbEnabled) {
-  lastSettingsUnauthorized = false;
+async function saveSettings() {
   const body = {
     proxy: $("proxy").value.trim(),
     proxy_scope: $("proxyScope").value,
-    db_enabled: dbEnabled != null ? dbEnabled : $("dbEnabled").checked,
-    require_login: $("requireLogin").checked,
-    allow_register: $("allowRegister").checked,
   };
   try {
     const resp = await fetch("/api/settings", {
@@ -1010,14 +1443,7 @@ async function saveSettings(dbEnabled) {
     if (!resp.ok) {
       let data = {};
       try { data = await resp.json(); } catch (e) { /* 非 JSON 错误响应 */ }
-      if (resp.status === 401) {
-        lastSettingsUnauthorized = true;
-        await loadAuth();
-        showLoginGate();
-        toast("请先登录");
-      } else {
-        toast(data.error || "设置保存失败");
-      }
+      toast(data.error || "设置保存失败");
       return false;
     }
     return true;
@@ -1025,13 +1451,6 @@ async function saveSettings(dbEnabled) {
     toast("设置保存失败");
     return false;
   }
-}
-
-// settingsSaveDone 统一处理保存后的认证刷新；失败时从服务端重新读取以回滚界面。
-async function settingsSaveDone(ok) {
-  if (!ok) await loadSettings();
-  await loadAuth();
-  if (!ok && lastSettingsUnauthorized) showLoginGate();
 }
 
 // applySettings 界面上点「应用」时保存代理设置。
@@ -1058,22 +1477,14 @@ async function loadAuth() {
   return authState;
 }
 
-// applyAuth 依据认证状态调整界面：数据库开关、账号入口、登录遮罩。
+// applyAuth 依据认证状态调整界面：账号入口、收藏入口与登录遮罩。
 function applyAuth() {
-  $("dbGrp").style.display = authState.db_available ? "" : "none";
-  $("dbEnabled").checked = !!authState.db_enabled;
   $("accountChip").style.display = authState.db_available ? "" : "none";
+  $("favBtn").style.display = authState.db_enabled ? "" : "none";
   $("accountBtn").style.display = authState.logged_in ? "" : "none";
   $("logoutBtn").style.display = authState.logged_in ? "" : "none";
   // 数据库记录关闭时不要求也不支持登录，避免出现“登录成功但没有会话”的假入口
   $("loginBtn").style.display = authState.db_enabled && !authState.logged_in ? "" : "none";
-
-  $("requireLogin").checked = !!authState.require_login;
-  $("allowRegister").checked = !!authState.allow_register;
-  // 只有已登录用户，或还没有任何账号的全新系统，才允许修改安全设置。
-  const canChangeSecurity = !!authState.logged_in || !!authState.needs_setup;
-  $("requireLogin").disabled = !canChangeSecurity;
-  $("allowRegister").disabled = !canChangeSecurity;
 
   if (gateForced()) {
     showGate(authState.needs_setup ? "setup" : "login");
@@ -1091,9 +1502,9 @@ function gateForced() {
 function showGate(mode) {
   gateMode = mode;
   const texts = {
-    login:    { title: "登录", sub: "登录后可记录检索历史，并管理账号与安全设置。", submit: "登录", confirm: false },
-    setup:    { title: "首次设置登录账号", sub: "服务已开启数据库记录。请先设置一个账号，之后可以用它登录并管理设置。", submit: "设置并登录", confirm: true },
-    register: { title: "注册账号", sub: "注册并登录后即可使用该服务，账号信息会保存到数据库。", submit: "注册并登录", confirm: true },
+    login:    { title: "登录", sub: "登录后可保存搜索历史与收藏，并管理账号。", submit: "登录", confirm: false },
+    setup:    { title: "首次设置登录账号", sub: "服务已开启数据库。请先设置一个账号，之后可以用它登录并管理账号。", submit: "设置并登录", confirm: true },
+    register: { title: "注册账号", sub: "注册并登录后即可保存搜索历史与收藏，账号信息会保存到数据库。", submit: "注册并登录", confirm: true },
     change:   { title: "修改账号密码", sub: "留空密码则只改用户名；修改后立即生效。", submit: "保存", confirm: true },
   };
   const t = texts[mode] || texts.login;
@@ -1160,6 +1571,7 @@ $("gateForm").onsubmit = async (e) => {
     $("gatePass2").value = "";
     $("gate").classList.remove("open");
     await loadAuth();
+    await refreshUserData();
     toast(gateMode === "login" ? "已登录" : gateMode === "register" ? "注册成功" : "账号已保存");
   } catch (err) {
     $("gateErr").textContent = err.message || String(err);
@@ -1188,6 +1600,7 @@ $("loginBtn").onclick = () => {
 $("logoutBtn").onclick = async () => {
   await fetch("/api/logout", { method: "POST" });
   await loadAuth();
+  await refreshUserData();
   toast("已退出登录");
 };
 
@@ -1214,10 +1627,10 @@ $("gateLogout").onclick = async (e) => {
   }
   await fetch("/api/logout", { method: "POST" });
   await loadAuth();
+  await refreshUserData();
   toast("已退出登录");
 };
 
-// 数据库开关
 // 手机端折叠筛选面板，摘要里显示当前选中几个引擎
 function updateFiltersSummary() {
   const total = engines.length;
@@ -1231,19 +1644,12 @@ $("filtersToggle").onclick = () => {
   updateFiltersSummary();
 };
 
-$("dbEnabled").onchange = async () => {
-  await settingsSaveDone(await saveSettings($("dbEnabled").checked));
-};
-
-// 安全开关：保存成功后刷新认证状态；失败时从服务端重新读取以回滚界面。
-async function onSecurityChange() {
-  await settingsSaveDone(await saveSettings());
-}
-$("requireLogin").onchange = onSecurityChange;
-$("allowRegister").onchange = onSecurityChange;
-
 // 关闭详情（手机上抽屉铺满整屏，点遮罩点不到，必须有关闭按钮）
 $("dClose").onclick = closeDetail;
+$("favClose").onclick = closeFavDrawer;
+$("historyClear").onclick = clearHistory;
+$("favBtn").onclick = openFavDrawer;
+$("favFilter").oninput = renderFavorites;
 
 /* ---------- 筛选提示：固定定位并自动避开视口边缘 ---------- */
 const tipBubble = $("tipBubble");
@@ -1334,11 +1740,11 @@ $("perPage").onchange = () => {
 };
 $("applyProxy").onclick = applySettings;
 $("healthBtn").onclick = checkHealth;
-$("mask").onclick = closeDetail;
+$("mask").onclick = () => { closeDetail(); closeFavDrawer(); };
 $("q").addEventListener("keydown", (e) => { if (e.key === "Enter") search(1); });
 
 document.addEventListener("keydown", (e) => {
-  if (e.key === "Escape") { closeDetail(); hideTip(); return; }
+  if (e.key === "Escape") { closeDetail(); closeFavDrawer(); hideTip(); return; }
   // 正在输入框里打字时不抢焦点，否则代理地址之类的没法直接敲
   const el = document.activeElement;
   const tag = el ? el.tagName : "";
@@ -1353,6 +1759,7 @@ document.addEventListener("keydown", (e) => {
   await loadAuth();
   await loadEngines();
   await loadSettings();
+  await refreshUserData();
 })();
 </script>
 </body>

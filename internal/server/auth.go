@@ -50,6 +50,14 @@ type authState struct {
 	AllowRegister bool `json:"allow_register"`
 }
 
+// sessionIdentity 是会话里携带的账号信息。
+type sessionIdentity struct {
+	// UserID 账号 ID，未登录时不会出现在会话里
+	UserID int64
+	// Username 用户名
+	Username string
+}
+
 // dbEnabled 判断数据库是否启用。
 func (s *Server) dbEnabled() bool {
 	s.settingsMu.RLock()
@@ -135,18 +143,18 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	name, hash, found, err := s.store.User(r.Context(), strings.TrimSpace(in.Username))
+	user, found, err := s.store.LookupUser(r.Context(), strings.TrimSpace(in.Username))
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
-	if !found || bcrypt.CompareHashAndPassword(hash, []byte(in.Password)) != nil {
+	if !found || bcrypt.CompareHashAndPassword(user.PasswordHash, []byte(in.Password)) != nil {
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "用户名或密码不正确"})
 		return
 	}
 
-	s.setSession(w, name)
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "username": name})
+	s.setSession(w, user.ID, user.Username)
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "username": user.Username})
 }
 
 // handleRegister 处理自助注册。
@@ -193,9 +201,14 @@ func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
+	user, found, err := s.store.LookupUser(r.Context(), in.Username)
+	if err != nil || !found {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "注册成功但读取账号失败，请重新登录"})
+		return
+	}
 
-	s.setSession(w, in.Username)
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "username": in.Username})
+	s.setSession(w, user.ID, user.Username)
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "username": user.Username})
 }
 
 // handleLogout 清除会话。
@@ -276,9 +289,14 @@ func (s *Server) handleAccount(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
+	user, found, err := s.store.LookupUser(r.Context(), in.Username)
+	if err != nil || !found {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "账号已保存但读取失败，请重新登录"})
+		return
+	}
 
-	s.setSession(w, in.Username)
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "username": in.Username})
+	s.setSession(w, user.ID, user.Username)
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "username": user.Username})
 }
 
 // requireAuth 在启用数据库、要求登录且已有账号时，要求请求带上有效会话。
@@ -310,10 +328,12 @@ func (s *Server) requireAuth(next http.HandlerFunc) http.HandlerFunc {
 	}
 }
 
-// setSession 下发签名会话 cookie。
-func (s *Server) setSession(w http.ResponseWriter, username string) {
+// setSession 下发签名会话 cookie，载荷里带上账号 ID 与用户名。
+func (s *Server) setSession(w http.ResponseWriter, userID int64, username string) {
 	expires := time.Now().Add(sessionTTL).Unix()
-	payload := username + "|" + strconv.FormatInt(expires, 10)
+	payload := strconv.FormatInt(userID, 10) + "|" +
+		strconv.FormatInt(expires, 10) + "|" +
+		base64.RawURLEncoding.EncodeToString([]byte(username))
 	sig := s.sign(payload)
 	http.SetCookie(w, &http.Cookie{
 		Name:     sessionCookie,
@@ -325,30 +345,63 @@ func (s *Server) setSession(w http.ResponseWriter, username string) {
 	})
 }
 
-// sessionUser 校验会话 cookie，返回登录用户名。
-func (s *Server) sessionUser(r *http.Request) (string, bool) {
+// sessionIdentity 校验会话 cookie，返回账号 ID 与用户名。
+func (s *Server) sessionIdentity(r *http.Request) (sessionIdentity, bool) {
 	c, err := r.Cookie(sessionCookie)
 	if err != nil || c.Value == "" {
-		return "", false
+		return sessionIdentity{}, false
 	}
 	raw, err := base64.RawURLEncoding.DecodeString(c.Value)
 	if err != nil {
-		return "", false
+		return sessionIdentity{}, false
 	}
 	parts := strings.Split(string(raw), "|")
-	if len(parts) != 3 {
-		return "", false
+	if len(parts) != 4 {
+		return sessionIdentity{}, false
 	}
-	username, expiresStr, sig := parts[0], parts[1], parts[2]
+	userID, err := strconv.ParseInt(parts[0], 10, 64)
+	if err != nil || userID < 0 {
+		return sessionIdentity{}, false
+	}
+	expires, err := strconv.ParseInt(parts[1], 10, 64)
+	if err != nil {
+		return sessionIdentity{}, false
+	}
 	// 先校验签名，再校验有效期，避免伪造请求触发额外解析
-	if subtle.ConstantTimeCompare([]byte(sig), []byte(s.sign(username+"|"+expiresStr))) != 1 {
+	signed := strings.Join(parts[:3], "|")
+	if subtle.ConstantTimeCompare([]byte(parts[3]), []byte(s.sign(signed))) != 1 {
+		return sessionIdentity{}, false
+	}
+	if time.Now().Unix() > expires {
+		return sessionIdentity{}, false
+	}
+	nameRaw, err := base64.RawURLEncoding.DecodeString(parts[2])
+	if err != nil {
+		return sessionIdentity{}, false
+	}
+	name := string(nameRaw)
+	if name == "" {
+		return sessionIdentity{}, false
+	}
+	return sessionIdentity{UserID: userID, Username: name}, true
+}
+
+// sessionUser 校验会话 cookie，返回登录用户名。
+func (s *Server) sessionUser(r *http.Request) (string, bool) {
+	identity, ok := s.sessionIdentity(r)
+	if !ok {
 		return "", false
 	}
-	expires, err := strconv.ParseInt(expiresStr, 10, 64)
-	if err != nil || time.Now().Unix() > expires {
-		return "", false
+	return identity.Username, true
+}
+
+// currentUserID 返回当前账号 ID，未登录时为 0。
+func (s *Server) currentUserID(r *http.Request) int64 {
+	identity, ok := s.sessionIdentity(r)
+	if !ok {
+		return 0
 	}
-	return username, true
+	return identity.UserID
 }
 
 // sign 用进程内的密钥对载荷做 HMAC-SHA256。

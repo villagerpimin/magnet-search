@@ -52,6 +52,8 @@ const (
 
 // SearchLog 是一条检索记录。
 type SearchLog struct {
+	// UserID 发起检索的账号 ID，未登录时为 0
+	UserID int64
 	// Query 检索关键词
 	Query string
 	// IP 来源 IP
@@ -76,6 +78,7 @@ type Store struct {
 // 建表语句：启动时执行一次，保证表结构存在。
 const schemaSearchLog = "CREATE TABLE IF NOT EXISTS search_log (" +
 	"id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT," +
+	"user_id BIGINT UNSIGNED NOT NULL DEFAULT 0," +
 	"`query` VARCHAR(512) NOT NULL," +
 	"ip VARCHAR(64) NOT NULL DEFAULT ''," +
 	"user_agent VARCHAR(255) NOT NULL DEFAULT ''," +
@@ -85,6 +88,7 @@ const schemaSearchLog = "CREATE TABLE IF NOT EXISTS search_log (" +
 	"created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP," +
 	"PRIMARY KEY (id)," +
 	"KEY idx_created_at (created_at)," +
+	"KEY idx_user_created (user_id, created_at)," +
 	"KEY idx_query (`query`(191))" +
 	") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4"
 
@@ -166,10 +170,40 @@ func Open(ctx context.Context, cfg Config) (*Store, error) {
 
 // ensureSchema 建表，已存在则跳过。
 func (s *Store) ensureSchema(ctx context.Context) error {
-	for _, stmt := range []string{schemaSearchLog, schemaAppUser, schemaAppSetting} {
+	for _, stmt := range []string{schemaSearchLog, schemaAppUser, schemaAppSetting, schemaSearchHistory, schemaAppFavorite} {
 		if _, err := s.db.ExecContext(ctx, stmt); err != nil {
 			return fmt.Errorf("初始化表结构失败: %w", err)
 		}
+	}
+	// 旧库的 search_log 没有 user_id，需要补列；新库建表时已经带上。
+	if err := s.ensureColumn(ctx, "search_log", "user_id",
+		"ALTER TABLE search_log ADD COLUMN user_id BIGINT UNSIGNED NOT NULL DEFAULT 0 AFTER id"); err != nil {
+		return err
+	}
+	return nil
+}
+
+// ensureColumn 在列不存在时执行迁移语句。
+// 并发启动时另一个进程可能已经加上了这一列，重复列错误视为成功。
+func (s *Store) ensureColumn(ctx context.Context, table, column, ddl string) error {
+	var count int
+	err := s.db.QueryRowContext(ctx,
+		"SELECT COUNT(*) FROM information_schema.COLUMNS "+
+			"WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ?",
+		table, column,
+	).Scan(&count)
+	if err != nil {
+		return fmt.Errorf("检查 %s.%s 失败: %w", table, column, err)
+	}
+	if count > 0 {
+		return nil
+	}
+	if _, err := s.db.ExecContext(ctx, ddl); err != nil {
+		var me *mysql.MySQLError
+		if errors.As(err, &me) && me.Number == 1060 {
+			return nil
+		}
+		return fmt.Errorf("迁移 %s.%s 失败: %w", table, column, err)
 	}
 	return nil
 }
@@ -188,8 +222,8 @@ func (s *Store) LogSearch(ctx context.Context, e SearchLog) error {
 		return nil
 	}
 	_, err := s.db.ExecContext(ctx,
-		"INSERT INTO search_log (`query`, ip, user_agent, engines, result_count, elapsed_ms) VALUES (?, ?, ?, ?, ?, ?)",
-		truncate(e.Query, 512), truncate(e.IP, 64), truncate(e.UserAgent, 255),
+		"INSERT INTO search_log (user_id, `query`, ip, user_agent, engines, result_count, elapsed_ms) VALUES (?, ?, ?, ?, ?, ?, ?)",
+		e.UserID, truncate(e.Query, 512), truncate(e.IP, 64), truncate(e.UserAgent, 255),
 		truncate(e.Engines, 255), e.ResultCount, e.ElapsedMS,
 	)
 	if err != nil {
@@ -207,7 +241,7 @@ func (s *Store) Recent(ctx context.Context, limit int) ([]SearchLog, error) {
 		limit = 50
 	}
 	rows, err := s.db.QueryContext(ctx,
-		"SELECT `query`, ip, user_agent, engines, result_count, elapsed_ms, created_at FROM search_log ORDER BY id DESC LIMIT ?", limit)
+		"SELECT user_id, `query`, ip, user_agent, engines, result_count, elapsed_ms, created_at FROM search_log ORDER BY id DESC LIMIT ?", limit)
 	if err != nil {
 		return nil, fmt.Errorf("读取检索记录失败: %w", err)
 	}
@@ -216,7 +250,7 @@ func (s *Store) Recent(ctx context.Context, limit int) ([]SearchLog, error) {
 	var out []SearchLog
 	for rows.Next() {
 		var e SearchLog
-		if err := rows.Scan(&e.Query, &e.IP, &e.UserAgent, &e.Engines, &e.ResultCount, &e.ElapsedMS, &e.CreatedAt); err != nil {
+		if err := rows.Scan(&e.UserID, &e.Query, &e.IP, &e.UserAgent, &e.Engines, &e.ResultCount, &e.ElapsedMS, &e.CreatedAt); err != nil {
 			return nil, fmt.Errorf("解析检索记录失败: %w", err)
 		}
 		out = append(out, e)
@@ -310,20 +344,41 @@ func (s *Store) CountUsers(ctx context.Context) (int, error) {
 	return n, nil
 }
 
-// User 按用户名读取账号，返回库中规范化的用户名与密码哈希。
-func (s *Store) User(ctx context.Context, username string) (name string, hash []byte, found bool, err error) {
+// AppUser 是账号的完整记录。
+type AppUser struct {
+	// ID 账号自增主键，未登录时用 0 表示匿名
+	ID int64
+	// Username 用户名
+	Username string
+	// PasswordHash bcrypt 密码哈希
+	PasswordHash []byte
+}
+
+// LookupUser 按用户名读取账号，返回 ID、规范用户名与密码哈希。
+func (s *Store) LookupUser(ctx context.Context, username string) (AppUser, bool, error) {
 	if s == nil || s.db == nil {
-		return "", nil, false, nil
+		return AppUser{}, false, nil
 	}
+	var u AppUser
 	row := s.db.QueryRowContext(ctx,
-		"SELECT username, password_hash FROM app_user WHERE username = ? LIMIT 1", truncate(username, 64))
-	switch e := row.Scan(&name, &hash); {
-	case errors.Is(e, sql.ErrNoRows):
-		return "", nil, false, nil
-	case e != nil:
-		return "", nil, false, fmt.Errorf("读取账号失败: %w", e)
+		"SELECT id, username, password_hash FROM app_user WHERE username = ? LIMIT 1", truncate(username, 64))
+	switch err := row.Scan(&u.ID, &u.Username, &u.PasswordHash); {
+	case errors.Is(err, sql.ErrNoRows):
+		return AppUser{}, false, nil
+	case err != nil:
+		return AppUser{}, false, fmt.Errorf("读取账号失败: %w", err)
 	}
-	return name, hash, true, nil
+	return u, true, nil
+}
+
+// User 按用户名读取账号，返回库中规范化的用户名与密码哈希。
+// 保留给只需要用户名与哈希的旧调用方；需要 ID 时用 LookupUser。
+func (s *Store) User(ctx context.Context, username string) (name string, hash []byte, found bool, err error) {
+	u, found, err := s.LookupUser(ctx, username)
+	if err != nil || !found {
+		return "", nil, found, err
+	}
+	return u.Username, u.PasswordHash, true, nil
 }
 
 // CreateUser 新建账号，用户名重复时返回 ErrUserExists。

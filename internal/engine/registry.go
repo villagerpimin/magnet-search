@@ -12,4 +12,8 @@ func RegisterAll(reg *Registry) {
 	RegisterYts(reg)
 	RegisterSolidtorrents(reg)
 	RegisterKnaben(reg)
+	RegisterDmhy(reg)
+	RegisterMikan(reg)
+	RegisterAcgRip(reg)
+	RegisterTorrentsCsv(reg)
 }

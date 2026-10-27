@@ -1,6 +1,8 @@
 package engine
 
 import (
+	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -90,4 +92,25 @@ func TestRegisterEngines(t *testing.T) {
 			}
 		})
 	}
+}
+
+// routeClient 按 URL 返回预设响应，供需要多次请求的引擎测试使用。
+type routeClient struct {
+	// bodies URL 到响应体的映射
+	bodies map[string][]byte
+}
+
+// Get 按 URL 返回预设响应。
+func (c routeClient) Get(_ context.Context, url string) ([]byte, error) {
+	body, ok := c.bodies[url]
+	if !ok {
+		return nil, fmt.Errorf("未预设的 URL: %s", url)
+	}
+	return body, nil
+}
+
+// GetString 按 URL 返回预设响应的字符串形式。
+func (c routeClient) GetString(ctx context.Context, url string) (string, error) {
+	body, err := c.Get(ctx, url)
+	return string(body), err
 }

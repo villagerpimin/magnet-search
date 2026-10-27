@@ -98,15 +98,30 @@ msearch serve                        # 读 ./config.yaml，按里面的 addr 监
 会按需翻页，避免只抓到各站第一页；翻页与切换每页条数命中同一份服务端缓存（5 分钟），
 不会重新跑一遍网络检索。
 
-**代理**：筛选条右侧可直接填代理地址（留空表示不用），并选择作用范围
-——「仅境外引擎」（境内与通用引擎直连，失败再走代理，推荐）或「全部引擎」。
-点「应用」保存到服务端，之后的检索与自检都按此设置；也可以用命令行
-`--proxy http://127.0.0.1:7890` 或 `--proxy-engine bt4g=http://...` 指定。
-
 结果卡片给出**存活状态徽章**（活跃 / 冷门 / 未知 / 死链）、可信对等端数、相关度、
 来源引擎与来源标签；右侧色条把排序分拆成"相关度 / 存活证据 / 群体规模 / 新鲜度"四段，
-点"详情"可看到 info hash、全部 tracker 与分项数值；点"复制磁力"直接复制磁力链接。
+点"详情"可看到 info hash、全部 tracker、分项数值与**文件列表**；点"复制磁力"直接复制磁力链接。
 快捷键：`/` 聚焦搜索框、`Esc` 关闭详情面板。
+
+**搜索历史（关联账号）**：数据库启用后，每次检索都会写入 `search_history`
+（命中结果缓存的重复搜索只刷新时间，不重复写检索日志），按账号去重后显示在搜索框下方。
+
+- 点击历史条目会把关键词**填入搜索框**，不会立刻发起检索；
+- **长按**（约 650ms）条目可以删除单条历史；
+- 右侧「清除全部」清空当前账号的全部历史；
+- 未要求登录时，匿名检索归属到 `user_id = 0`；登录后使用自己的历史；
+- 数据库未启用时不显示历史栏。
+
+**收藏管理**：搜索结果卡片和详情抽屉里都有「☆ 收藏」，点一下即可加星标。
+
+- 右上角「收藏」打开收藏面板，可**复制磁力、按标题搜索、编辑标题与备注、删除**；
+- 同一账号重复收藏同一 info hash 会更新资源元数据，不会产生重复记录；
+- 收藏与历史一样按账号隔离；未要求登录时归属到 `user_id = 0`；
+- 数据库未启用时不显示收藏入口。
+
+**磁力内容（文件列表）**：详情抽屉会按 info hash 从公共种子缓存拉取 `.torrent`，
+解析出种子名称、文件总数、总大小与逐个文件列表；公共缓存没有收录时显示"暂无文件数据"，
+不影响搜索、复制磁力与收藏。解析结果在服务端缓存 30 分钟。
 
 接口（供二次开发）：
 
@@ -122,8 +137,17 @@ msearch serve                        # 读 ./config.yaml，按里面的 addr 监
 | `POST /api/register` | 注册并登录（需 `allow_register` 开启） |
 | `POST /api/account` | 首次设置账号或修改当前账号（密码留空表示不改） |
 | `POST /api/logout` | 退出登录 |
-| `GET /api/settings` | 读取代理、数据库与登录/注册开关 |
-| `POST /api/settings` | 保存设置，body 含 `proxy`、`proxy_scope`、`db_enabled`、`require_login`、`allow_register` |
+| `GET /api/settings` | 读取代理设置（数据库与登录/注册开关只读，来自启动配置或数据库） |
+| `POST /api/settings` | 保存代理设置，body 含 `proxy`、`proxy_scope`；不再接受数据库与登录/注册开关 |
+| `GET /api/history` | 当前账号的去重搜索历史（未要求登录且未登录时归属 `user_id = 0`） |
+| `DELETE /api/history?query=...` | 删除当前账号的一条搜索历史 |
+| `POST /api/history/clear` | 清空当前账号的全部搜索历史 |
+| `GET /api/favorites` | 当前账号的收藏列表（未要求登录且未登录时归属 `user_id = 0`） |
+| `POST /api/favorites` | 新增收藏，body 含 `info_hash`、`title`、`magnet`、`size`、`size_bytes`、`seeders`、`leechers`、`sources` |
+| `DELETE /api/favorites?hash=...` | 按 info hash 取消收藏（搜索卡片上的星标） |
+| `PUT /api/favorites/{id}` | 修改收藏标题与备注，body 为 `{"title":"…","note":"…"}` |
+| `DELETE /api/favorites/{id}` | 按 ID 删除收藏 |
+| `GET /api/files?hash=...` | 读取磁力内容：种子名称、总大小与文件列表；公共缓存未收录时返回 404 |
 
 搜索接口另外支持 `per_page`（每页条数，默认 20）与 `page`（页码，从 1 开始），
 返回体含 `total`、`page`、`per_page`、`total_pages`、`pool_size`。
@@ -196,8 +220,9 @@ Windows 上使用时的两点注意：
 
 ## 数据库与登录（可选）
 
-默认不连数据库，检索不需要登录。配置 MySQL 后会**记录每次检索**（关键词、时间、来源 IP、
-参与引擎、结果条数、耗时），并按数据库里的两个开关决定是否要求登录、是否开放注册。
+默认不连数据库，检索不需要登录。配置 MySQL 后会**记录每次检索**（账号 ID、关键词、时间、
+来源 IP、参与引擎、结果条数、耗时），并按数据库里的两个开关决定是否要求登录、是否开放注册。
+未要求登录时，检索记录的账号 ID 记为 `0`。
 
 在 `config.yaml` 里配置：
 
@@ -224,7 +249,8 @@ account:
 ```
 
 `require_login` / `allow_register` 首次启动时会作为默认值写入 `app_setting` 表；
-之后以库里的值为准，也可以在网页筛选面板里修改（需要已登录，或系统还没有任何账号）。
+之后以库里的值为准。**Web 页面不再展示或修改这两个开关**，也不会展示「记录到数据库」开关：
+它们只读取启动时的配置文件或数据库里的值，避免在网页上临时改变安全语义。
 
 不想记录、也不想登录：把 `database.enabled` 改成 `false`（或删掉整段）即可。
 
@@ -235,15 +261,18 @@ account:
 | 关闭 | — | — | 不记录、不要求登录（默认状态） |
 | 启用 | true | 无 | 打开界面引导**首次设置账号**；设置前仍可检索 |
 | 启用 | true | 有 | 检索必须登录，未登录返回 401，界面弹出登录框 |
-| 启用 | false | — | 记录检索，但不要求登录；右上角仍可主动登录 |
+| 启用 | false | — | 记录检索，但不要求登录；右上角仍可主动登录；匿名历史与收藏归属 `user_id = 0` |
 | 启用 | 任意 | 任意 | `allow_register: true` 时登录框显示注册入口 |
 
-- 表结构在启动时自动创建（`search_log`、`app_user`、`app_setting`），无需手工建表。
+- 表结构在启动时自动创建（`search_log`、`search_history`、`app_favorite`、`app_user`、`app_setting`），
+  无需手工建表；旧库的 `search_log` 会自动补上 `user_id` 列。
 - 支持多个账号：可自助注册（开关打开时），也可登录后在右上角「账号」里改用户名/密码，
   或用「退出」切换账号。
-- 账号密码用 **bcrypt** 存哈希，会话是 HMAC 签名的 HttpOnly Cookie（有效期 7 天）。
-- 界面上可以随时用「记录到数据库」开关临时关闭记录与登录校验；开关状态存在进程内。
-  `require_login` / `allow_register` 存在数据库里，重启后保持。
+- 账号密码用 **bcrypt** 存哈希，会话是 HMAC 签名的 HttpOnly Cookie（有效期 7 天），
+  会话里带账号 ID，检索日志、搜索历史与收藏都按它归属。
+- 搜索历史按「账号 + 关键词」去重；收藏按「账号 + info hash」去重，重复收藏只更新元数据。
+- 记录与登录开关只来自启动配置或数据库，网页不提供临时开关；`require_login` /
+  `allow_register` 存在数据库里，重启后保持。
 - 数据库连不上时不会让服务起不来：打印警告并按「未启用数据库」运行。
 
 ## 内置引擎
@@ -259,6 +288,13 @@ account:
 | `tokyotosho` | overseas | RSS / HTML | 东京所 tracker，逐条给 S/L/C |
 | `solidtorrents` | overseas | HTML | 与 bitsearch 同模板 |
 | `knaben` | overseas | HTML | 逐条给出"最近确认时间"，是比做种数更硬的存活信号 |
+| `dmhy` | domestic | **RSS** | 动漫花园，enclosure 直接给磁力，中文动漫资源 |
+| `mikan` | domestic | RSS + `.torrent` | 蜜柑计划，RSS 给种子下载地址，服务解析 info hash |
+| `acgrip` | domestic | RSS + `.torrent` | ACG.RIP，下载种子解析 info hash，中文动漫资源 |
+| `torrentscsv` | any | JSON API | torrents-csv.com，带做种/下载数与创建时间 |
+
+`mikan` 与 `acgrip` 的 RSS 只给 `.torrent` 地址、不给 info hash，服务会并发下载种子文件并解析；
+为控制请求量，单次检索最多处理 24 条，解析失败的条目会被跳过。
 
 每个引擎都带**镜像兜底**：主域名不可达时自动按顺序换下一个镜像。例如
 `bt4g` → bt4gprx.com / bt4g.org，`yts` → yts.rs / yts.gg / yts.am，
@@ -351,7 +387,7 @@ swarmSize = min(1, log2(1+做种数)/log2(201)) * 置信度
 
 | 通道 | 状态 |
 |---|---|
-| 搜索引擎 | apibay / bitsearch / rutor / tokyotosho / bt4g / nyaa / yts 均可用 |
+| 搜索引擎 | apibay / bitsearch / rutor / tokyotosho / bt4g / nyaa / yts / dmhy / mikan / acgrip / torrentscsv 均可用 |
 | HTTP tracker | 不可达（`tracker.torrentbay.net`、`tracker.gbitt.info`、`tracker.torrent.eu.org` 等全部超时） |
 | UDP tracker | 不可达（出站 UDP 被 TUN 代理阻断） |
 | DHT | 不可达 |
@@ -368,6 +404,9 @@ internal/model/     数据契约：Result / Liveness（Unknown = -1 与真实 0 
 internal/engine/    搜索引擎适配器：HTML / JSON / RSS 各自一个实现
 internal/httpx/     共享 HTTP 客户端：多代理链、重试、同 host 限流
 internal/magnet/    磁力链接与 info hash 解析（hex40 与 base32 双支持）
+internal/torrent/   `.torrent` 解析：info hash、tracker 与文件列表
+internal/store/     MySQL 持久化：检索日志、搜索历史、收藏、账号与运行时开关
+internal/server/    Web 界面、JSON/SSE 接口、登录会话与收藏/历史接口
 internal/liveness/  存活探测：bencode、UDP/HTTP tracker、DHT、能力自检
 internal/aggregate/ 去重合并、分词、相关度、存活判定、排序
 docs/SPEC.md        判定与排序的设计规格（含阈值依据与失败模式）
@@ -381,3 +420,7 @@ docs/SPEC.md        判定与排序的设计规格（含阈值依据与失败模
   （引擎的索引里通常带中文别名），跨语种文本相似度不做硬匹配。
 - `1337x` 与 `magnetdl` 暂未接入：前者搜索页被 Cloudflare 全站挑战，后者需要先取一次性
   JWT 才能拿到真实搜索地址。
+- 文件列表依赖公共种子缓存（itorrents.net / itorrents.org）；很新的种子或冷门种子可能尚未收录，
+  此时详情里显示"暂无文件数据"，不影响磁力本身。
+- `mikan` / `acgrip` 需要先下载 `.torrent` 才能得到 info hash，比纯 RSS 引擎慢一些，
+  单次检索最多解析 24 条。
