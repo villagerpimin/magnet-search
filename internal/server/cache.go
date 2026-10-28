@@ -10,7 +10,7 @@ import (
 // 检索结果缓存的默认参数。
 const (
 	// cacheTTL 缓存有效期，超时后重新检索
-	cacheTTL = 5 * time.Minute
+	cacheTTL = 30 * time.Minute
 	// cacheMaxEntries 最多保留多少份结果
 	cacheMaxEntries = 8
 )
