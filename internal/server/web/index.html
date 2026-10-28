@@ -567,6 +567,11 @@ main { flex: 1; padding: 4px 20px calc(28px + var(--nav-h) + var(--nav-offset) +
       </select>
       <button class="mini" id="applyProxy" type="button">应用</button>
     </div>
+    <div class="grp">
+      <label class="tip" data-tip="Clash 等代理开启认证（authentication）时填写。&#10;&#10;两项都留空 = 不认证（默认）；也可以把凭据直接写在代理地址里（http://用户名:密码@主机:端口）。">代理认证<span class="q">?</span></label>
+      <input id="proxyUser" type="text" placeholder="用户名（可选）" size="12" autocomplete="username">
+      <input id="proxyPassword" type="password" placeholder="密码（可选）" size="12" autocomplete="current-password">
+    </div>
   </div>
 </div>
 
@@ -1711,6 +1716,8 @@ async function loadSettings() {
     const s = await (await fetch("/api/settings")).json();
     $("proxy").value = s.proxy || "";
     $("proxyScope").value = s.proxy_scope === "all" ? "all" : "region";
+    $("proxyUser").value = s.proxy_username || "";
+    $("proxyPassword").value = s.proxy_password || "";
   } catch (e) { /* 读不到就保持默认 */ }
 }
 
@@ -1718,6 +1725,8 @@ async function saveSettings() {
   const body = {
     proxy: $("proxy").value.trim(),
     proxy_scope: $("proxyScope").value,
+    proxy_username: $("proxyUser").value.trim(),
+    proxy_password: $("proxyPassword").value,
   };
   try {
     const resp = await fetch("/api/settings", {

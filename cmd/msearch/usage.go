@@ -36,6 +36,8 @@ serve 的全部配置（监听地址、代理、数据库、账号、检索默�
 网络选项:
   --proxy url[,url]    全局代理，可多个，按顺序回退
   --proxy-engine e=url 指定引擎使用特定代理，可重复
+  --proxy-user name    全局代理认证用户名（留空=不认证）
+  --proxy-pass pass    全局代理认证密码
   --timeout dur        单次 HTTP 请求超时（默认 15s）
   --engine-timeout dur 单引擎墙钟预算（默认 25s）
   --retries n          单次请求的重试次数（默认 2）

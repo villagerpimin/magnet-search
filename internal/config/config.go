@@ -54,6 +54,10 @@ type Config struct {
 	ProxyScope string `yaml:"proxy_scope"`
 	// ProxyEngines 按引擎单独指定代理
 	ProxyEngines map[string]string `yaml:"proxy_engines"`
+	// ProxyUsername 代理认证用户名；与 proxy_password 同时为空表示不认证
+	ProxyUsername string `yaml:"proxy_username"`
+	// ProxyPassword 代理认证密码
+	ProxyPassword string `yaml:"proxy_password"`
 	// Timeout 单次 HTTP 请求超时
 	Timeout Duration `yaml:"timeout"`
 	// EngineTimeout 单引擎墙钟预算
@@ -219,6 +223,9 @@ func (c *Config) validate() error {
 	if (c.Account.Username == "") != (c.Account.Password == "") {
 		return fmt.Errorf("account.username 与 account.password 需要同时填写")
 	}
+	if (strings.TrimSpace(c.ProxyUsername) == "") != (c.ProxyPassword == "") {
+		return fmt.Errorf("proxy_username 与 proxy_password 需要同时填写")
+	}
 	if c.Account.Password != "" && len(c.Account.Password) < 6 {
 		return fmt.Errorf("account.password 至少 6 位")
 	}
@@ -245,6 +252,8 @@ func (c *Config) Options() app.Options {
 		Proxy:          c.Proxy,
 		ProxyScope:     c.ProxyScope,
 		ProxyEngine:    c.ProxyEngines,
+		ProxyUsername:  c.ProxyUsername,
+		ProxyPassword:  c.ProxyPassword,
 		Timeout:        c.Timeout.Duration(),
 		EngineTimeout:  c.EngineTimeout.Duration(),
 		Retries:        c.Retries,

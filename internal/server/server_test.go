@@ -386,6 +386,97 @@ func TestSettingsPartialPayload(t *testing.T) {
 	}
 }
 
+// TestSettingsProxyAuth 校验代理认证用户名与密码能保存并读回。
+func TestSettingsProxyAuth(t *testing.T) {
+	srv := New(app.Options{}, nil, store.AppSettings{})
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+
+	body := strings.NewReader(`{"proxy":"http://127.0.0.1:7897","proxy_scope":"region","proxy_username":"alice","proxy_password":"s3cret"}`)
+	resp, err := http.Post(ts.URL+"/api/settings", "application/json", body)
+	if err != nil {
+		t.Fatalf("保存设置失败: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("保存设置状态码 = %d，期望 200", resp.StatusCode)
+	}
+	var saved Settings
+	if err := json.NewDecoder(resp.Body).Decode(&saved); err != nil {
+		t.Fatalf("解析保存结果失败: %v", err)
+	}
+	if saved.ProxyUsername != "alice" || saved.ProxyPassword != "s3cret" {
+		t.Errorf("保存的代理认证 = %q/%q，期望 alice/s3cret", saved.ProxyUsername, saved.ProxyPassword)
+	}
+
+	// 读回时字段应完整往返
+	getResp, err := http.Get(ts.URL + "/api/settings")
+	if err != nil {
+		t.Fatalf("读取设置失败: %v", err)
+	}
+	defer getResp.Body.Close()
+	var got Settings
+	if err := json.NewDecoder(getResp.Body).Decode(&got); err != nil {
+		t.Fatalf("解析设置失败: %v", err)
+	}
+	if got.Proxy != "http://127.0.0.1:7897" || got.ProxyScope != app.ProxyScopeRegion {
+		t.Errorf("读回的代理 = %q/%q，期望地址与 region", got.Proxy, got.ProxyScope)
+	}
+	if got.ProxyUsername != "alice" || got.ProxyPassword != "s3cret" {
+		t.Errorf("读回的代理认证 = %q/%q，期望 alice/s3cret", got.ProxyUsername, got.ProxyPassword)
+	}
+}
+
+// TestSettingsProxyAuthPartialPreservesAuth 校验部分提交（不带认证字段）时不清空已保存的认证。
+func TestSettingsProxyAuthPartialPreservesAuth(t *testing.T) {
+	srv := New(app.Options{}, nil, store.AppSettings{})
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+
+	// 先保存代理与认证凭据
+	full := strings.NewReader(`{"proxy":"http://127.0.0.1:7897","proxy_username":"alice","proxy_password":"s3cret"}`)
+	resp, err := http.Post(ts.URL+"/api/settings", "application/json", full)
+	if err != nil {
+		t.Fatalf("保存完整设置失败: %v", err)
+	}
+	resp.Body.Close()
+
+	// 再只提交代理地址，认证字段缺失，应保留原值
+	partial := strings.NewReader(`{"proxy":"http://127.0.0.1:7897"}`)
+	resp2, err := http.Post(ts.URL+"/api/settings", "application/json", partial)
+	if err != nil {
+		t.Fatalf("保存部分设置失败: %v", err)
+	}
+	defer resp2.Body.Close()
+	if resp2.StatusCode != http.StatusOK {
+		t.Fatalf("部分保存状态码 = %d，期望 200", resp2.StatusCode)
+	}
+	var got Settings
+	if err := json.NewDecoder(resp2.Body).Decode(&got); err != nil {
+		t.Fatalf("解析设置失败: %v", err)
+	}
+	if got.ProxyUsername != "alice" || got.ProxyPassword != "s3cret" {
+		t.Errorf("部分提交后代理认证 = %q/%q，期望保留 alice/s3cret", got.ProxyUsername, got.ProxyPassword)
+	}
+}
+
+// TestSettingsProxyAuthRequiresPair 校验只填用户名不填密码时被拒绝。
+func TestSettingsProxyAuthRequiresPair(t *testing.T) {
+	srv := New(app.Options{}, nil, store.AppSettings{})
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+
+	body := strings.NewReader(`{"proxy":"http://127.0.0.1:7897","proxy_username":"alice"}`)
+	resp, err := http.Post(ts.URL+"/api/settings", "application/json", body)
+	if err != nil {
+		t.Fatalf("保存设置失败: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("只填用户名状态码 = %d，期望 400", resp.StatusCode)
+	}
+}
+
 // TestNewAuthSettings 校验构造时按数据库可用性初始化安全开关。
 func TestNewAuthSettings(t *testing.T) {
 	none := New(app.Options{}, nil, store.AppSettings{RequireLogin: true, AllowRegister: true})
@@ -563,5 +654,37 @@ func TestSessionIdentityCarriesUserID(t *testing.T) {
 	}
 	if identity.UserID != 42 || identity.Username != "alice" {
 		t.Errorf("会话身份 = %+v，期望 42/alice", identity)
+	}
+}
+
+// TestSearchOptionsCarryProxyAuth 校验保存的代理认证会进入检索参数。
+func TestSearchOptionsCarryProxyAuth(t *testing.T) {
+	srv := New(app.Options{
+		Proxy:         []string{"http://127.0.0.1:7897"},
+		ProxyUsername: "alice",
+		ProxyPassword: "s3cret",
+	}, nil, store.AppSettings{})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/search?q=ubuntu", nil)
+	opts, _, _, err := srv.searchOptions(req)
+	if err != nil {
+		t.Fatalf("解析检索参数失败: %v", err)
+	}
+	if opts.ProxyUsername != "alice" || opts.ProxyPassword != "s3cret" {
+		t.Errorf("检索参数代理认证 = %q/%q，期望 alice/s3cret", opts.ProxyUsername, opts.ProxyPassword)
+	}
+
+	// 界面上改过认证后，检索应使用新的凭据
+	srv.settingsMu.Lock()
+	srv.settings.ProxyUsername = "bob"
+	srv.settings.ProxyPassword = "newpass"
+	srv.settingsMu.Unlock()
+
+	opts, _, _, err = srv.searchOptions(req)
+	if err != nil {
+		t.Fatalf("解析检索参数失败: %v", err)
+	}
+	if opts.ProxyUsername != "bob" || opts.ProxyPassword != "newpass" {
+		t.Errorf("检索参数代理认证 = %q/%q，期望 bob/newpass", opts.ProxyUsername, opts.ProxyPassword)
 	}
 }

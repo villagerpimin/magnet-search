@@ -60,6 +60,10 @@ type Settings struct {
 	Proxy string `json:"proxy"`
 	// ProxyScope 代理作用范围：region 只代理境外引擎，all 代理全部引擎
 	ProxyScope string `json:"proxy_scope"`
+	// ProxyUsername 代理认证用户名，空表示不认证
+	ProxyUsername string `json:"proxy_username"`
+	// ProxyPassword 代理认证密码
+	ProxyPassword string `json:"proxy_password"`
 	// DBEnabled 数据库是否启用；关闭时不记录检索、也不需要登录。
 	// 只来自启动配置或数据库，不通过 Web 接口读写。
 	DBEnabled bool `json:"-"`
@@ -74,8 +78,10 @@ type Settings struct {
 // settingsRequest 是保存设置的请求体。
 // 数据库与登录/注册开关不在请求体里：它们只来自启动配置或数据库。
 type settingsRequest struct {
-	Proxy      string `json:"proxy"`
-	ProxyScope string `json:"proxy_scope"`
+	Proxy         string  `json:"proxy"`
+	ProxyScope    string  `json:"proxy_scope"`
+	ProxyUsername *string `json:"proxy_username"`
+	ProxyPassword *string `json:"proxy_password"`
 }
 
 // New 创建 Web 服务。
@@ -86,9 +92,11 @@ func New(defaults app.Options, st *store.Store, dbSettings store.AppSettings) *S
 	engine.RegisterAll(reg)
 	settings := Settings{
 		// 命令行传入的代理作为初始设置，界面打开时直接可见
-		Proxy:      strings.Join(defaults.Proxy, ","),
-		ProxyScope: app.ProxyScopeRegion,
-		DBEnabled:  st != nil,
+		Proxy:         strings.Join(defaults.Proxy, ","),
+		ProxyScope:    app.ProxyScopeRegion,
+		ProxyUsername: defaults.ProxyUsername,
+		ProxyPassword: defaults.ProxyPassword,
+		DBEnabled:     st != nil,
 	}
 	if st != nil {
 		settings.RequireLogin = dbSettings.RequireLogin
@@ -204,6 +212,18 @@ func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
 		if in.ProxyScope == app.ProxyScopeAll {
 			next.ProxyScope = app.ProxyScopeAll
 		}
+		// 代理认证：字段缺失时保留原值；用户名去掉首尾空白，密码原样保留。
+		if in.ProxyUsername != nil {
+			next.ProxyUsername = strings.TrimSpace(*in.ProxyUsername)
+		}
+		if in.ProxyPassword != nil {
+			next.ProxyPassword = *in.ProxyPassword
+		}
+		// 认证用户名与密码必须同时填写或同时留空。
+		if (next.ProxyUsername == "") != (next.ProxyPassword == "") {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "代理认证用户名与密码需要同时填写"})
+			return
+		}
 		// 数据库、登录与注册开关只读：来自启动配置或数据库，界面不再修改。
 		s.settingsMu.Lock()
 		s.settings = next
@@ -242,6 +262,8 @@ func (s *Server) handleCheck(w http.ResponseWriter, r *http.Request) {
 	if len(opts.Proxy) == 0 && saved.Proxy != "" {
 		opts.Proxy = splitList(saved.Proxy)
 	}
+	opts.ProxyUsername = saved.ProxyUsername
+	opts.ProxyPassword = saved.ProxyPassword
 
 	reg := engine.NewRegistry()
 	engine.RegisterAll(reg)
@@ -428,6 +450,9 @@ func (s *Server) searchOptions(r *http.Request) (app.Options, int, int, error) {
 	} else if saved.ProxyScope != "" {
 		opts.ProxyScope = saved.ProxyScope
 	}
+	// 代理认证凭据来自保存的设置；saved 在 New 里已用默认值初始化。
+	opts.ProxyUsername = saved.ProxyUsername
+	opts.ProxyPassword = saved.ProxyPassword
 	if v := q.Get("probe"); v != "" {
 		opts.Probe = v == "1" || v == "true"
 	}

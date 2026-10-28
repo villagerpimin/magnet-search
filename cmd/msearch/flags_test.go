@@ -94,3 +94,23 @@ func TestParseArgsSplitQuery(t *testing.T) {
 		t.Errorf("--no-split 不应吞掉位置参数，实际查询 %q", opts.app.Query)
 	}
 }
+
+// TestParseArgsProxyAuth 校验代理认证用户名与密码会被透传到流水线参数。
+func TestParseArgsProxyAuth(t *testing.T) {
+	opts, err := parseArgs([]string{"--proxy-user", "alice", "--proxy-pass", "s3cret", "--proxy", "http://127.0.0.1:7897", "query"})
+	if err != nil {
+		t.Fatalf("解析参数失败: %v", err)
+	}
+	if opts.app.ProxyUsername != "alice" {
+		t.Errorf("ProxyUsername = %q，期望 %q", opts.app.ProxyUsername, "alice")
+	}
+	if opts.app.ProxyPassword != "s3cret" {
+		t.Errorf("ProxyPassword = %q，期望 %q", opts.app.ProxyPassword, "s3cret")
+	}
+	if len(opts.app.Proxy) != 1 || opts.app.Proxy[0] != "http://127.0.0.1:7897" {
+		t.Errorf("代理列表 = %v，期望只有 http://127.0.0.1:7897", opts.app.Proxy)
+	}
+	if opts.app.Query != "query" {
+		t.Errorf("查询词 = %q，期望 %q", opts.app.Query, "query")
+	}
+}

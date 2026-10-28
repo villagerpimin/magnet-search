@@ -173,6 +173,8 @@ func (s *Server) handleCheckStream(w http.ResponseWriter, r *http.Request) {
 	if len(opts.Proxy) == 0 && saved.Proxy != "" {
 		opts.Proxy = splitList(saved.Proxy)
 	}
+	opts.ProxyUsername = saved.ProxyUsername
+	opts.ProxyPassword = saved.ProxyPassword
 
 	reg := engine.NewRegistry()
 	engine.RegisterAll(reg)

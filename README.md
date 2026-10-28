@@ -40,7 +40,7 @@ msearch serve --config /path/to/config.yaml
 只写想改的项即可，其余沿用默认值；写错（比如 `dead_filter` 拼错、`timeout` 不是 `15s` 这种时长）
 启动时会直接报错指出来，不会带着错配置跑起来。
 
-覆盖的配置项：监听地址、代理与作用范围、按引擎代理、超时与重试、检索默认值
+覆盖的配置项：监听地址、代理与作用范围、按引擎代理、代理认证、超时与重试、检索默认值
 （引擎、每页条数、死链策略、最少对等端、冷门席位、每簇条数、拆词检索、探测开关等）、
 数据库连接与登录/注册开关、登录账号。
 
@@ -68,7 +68,10 @@ msearch serve                        # 读 ./config.yaml，按里面的 addr 监
 
 **代理**：配置文件里的 `proxy` 会**自动填进界面的代理框**，开箱即用；
 界面上可随时改（留空 = 不用代理），并选择作用范围——「仅境外引擎」或「全部引擎」，
-点「应用」保存到服务端。也可以用命令行 `--proxy-engine bt4g=http://...` 单独指定某个引擎。
+点「应用」保存到服务端。也可以直接用命令行 `--proxy-engine bt4g=http://...` 单独指定某个引擎。
+
+需要认证的代理（如 Clash 开启 `authentication`）可填界面的用户名/密码框，或配置
+`proxy_username` / `proxy_password`；默认都不填 = 不认证。
 
 **引擎默认全选**，界面上第一个「全部」开关可一键全选/全不选；
 引擎选择与每页条数会记在浏览器本地，下次打开保持。
@@ -137,8 +140,8 @@ msearch serve                        # 读 ./config.yaml，按里面的 addr 监
 | `POST /api/register` | 注册并登录（需 `allow_register` 开启） |
 | `POST /api/account` | 首次设置账号或修改当前账号（密码留空表示不改） |
 | `POST /api/logout` | 退出登录 |
-| `GET /api/settings` | 读取代理设置（数据库与登录/注册开关只读，来自启动配置或数据库） |
-| `POST /api/settings` | 保存代理设置，body 含 `proxy`、`proxy_scope`；不再接受数据库与登录/注册开关 |
+| `GET /api/settings` | 读取代理设置（含 `proxy`、`proxy_scope`、`proxy_username`、`proxy_password`；数据库与登录/注册开关只读，来自启动配置或数据库） |
+| `POST /api/settings` | 保存代理设置，body 含 `proxy`、`proxy_scope`，可选 `proxy_username`、`proxy_password`（两项需同时提供，省略则保留已保存的认证）；不再接受数据库与登录/注册开关 |
 | `GET /api/history` | 当前账号的去重搜索历史（未要求登录且未登录时归属 `user_id = 0`） |
 | `DELETE /api/history?query=...` | 删除当前账号的一条搜索历史 |
 | `POST /api/history/clear` | 清空当前账号的全部搜索历史 |
@@ -212,6 +215,8 @@ Windows 上使用时的两点注意：
 --cluster-key mode   聚类粒度：resolution | full | none
 --proxy url[,url]    全局代理，可多个，按顺序回退
 --proxy-engine e=url 指定引擎使用特定代理，可重复
+--proxy-user name    代理认证用户名（与 --proxy-pass 同时使用，默认不认证）
+--proxy-pass pass    代理认证密码（与 --proxy-user 同时使用，默认不认证）
 --no-probe           只用引擎元数据，不做 tracker/DHT 探测
 --no-split           关闭拆词检索，只用完整查询
 --timeout dur        单次 HTTP 请求超时（默认 15s）
@@ -341,6 +346,19 @@ account:
 
 3. **用可达镜像**：`nyaa.ink`（Nyaa 镜像）、`yts.rs`、`bt4gprx.com` 在本机可直接访问，
    不改任何网络配置也能搜到海外内容。
+
+**代理认证**（Clash 开启 authentication 时）：先在 Clash 的 mixed-port 配置
+`authentication: ["user:pass"]`，再在 msearch 里写上代理与账号密码：
+
+```yaml
+proxy:
+  - "http://127.0.0.1:7897"
+proxy_username: "user"
+proxy_password: "pass"
+```
+
+默认不认证（两项留空即可）；也可以直接写进代理地址 `http://user:pass@127.0.0.1:7897`，
+但密码含 `@ : /` 等特殊字符时建议用上面的字段，避免 URL 转义问题。
 
 > 出口节点质量决定成败：实测同一 URL 经代理连续 8 次只有 4 次成功，
 > 所以客户端内置了**多代理链 + 指数退避重试**，`--proxy a,b` 可配多个出口轮换。

@@ -48,6 +48,10 @@ type Options struct {
 	ProxyScope string
 	// ProxyEngine 按引擎指定的代理
 	ProxyEngine map[string]string
+	// ProxyUsername 代理认证用户名；与 ProxyPassword 同时为空表示不认证
+	ProxyUsername string
+	// ProxyPassword 代理认证密码（仅在用户名非空时生效）
+	ProxyPassword string
 	// Timeout 单次 HTTP 请求超时
 	Timeout time.Duration
 	// EngineTimeout 单引擎墙钟预算
@@ -399,6 +403,8 @@ func BuildEngine(spec engine.Spec, opts Options) (engine.Engine, error) {
 		Timeout:        opts.Timeout,
 		Retries:        opts.Retries,
 		ConnectTimeout: 8 * time.Second,
+		ProxyUsername:  opts.ProxyUsername,
+		ProxyPassword:  opts.ProxyPassword,
 	})
 	if err != nil {
 		return nil, err

@@ -134,9 +134,11 @@ func (s *Server) fetchTorrent(ctx context.Context, hash string) ([]byte, error) 
 	chain := splitList(saved.Proxy)
 	chain = append(chain, "")
 	client, err := httpx.New(httpx.Options{
-		Proxies: chain,
-		Timeout: 15 * time.Second,
-		Retries: 1,
+		Proxies:       chain,
+		ProxyUsername: saved.ProxyUsername,
+		ProxyPassword: saved.ProxyPassword,
+		Timeout:       15 * time.Second,
+		Retries:       1,
 	})
 	if err != nil {
 		return nil, err

@@ -60,6 +60,9 @@ func TestLoadDefaults(t *testing.T) {
 	if cfg.DatabaseEnabled() {
 		t.Error("数据库默认应视为未启用")
 	}
+	if cfg.ProxyUsername != "" || cfg.ProxyPassword != "" {
+		t.Errorf("代理认证默认应为空: %+v", cfg)
+	}
 }
 
 // TestLoadOverrides 校验显式写的项会覆盖默认值。
@@ -72,6 +75,8 @@ proxy:
 proxy_scope: all
 proxy_engines:
   bt4g: "http://127.0.0.1:7897"
+proxy_username: alice
+proxy_password: s3cret
 timeout: 20s
 engine_timeout: 12s
 retries: 3
@@ -140,6 +145,9 @@ account:
 	if opts.Limit != 50 || opts.DeadFilter != "strict" || opts.ProxyScope != "all" {
 		t.Errorf("Options 映射不对: %+v", opts)
 	}
+	if opts.ProxyUsername != "alice" || opts.ProxyPassword != "s3cret" {
+		t.Errorf("代理认证映射不对: %+v", opts)
+	}
 	if len(opts.Engines) != 2 || opts.Timeout != 20*time.Second {
 		t.Errorf("Options 映射不对: %+v", opts)
 	}
@@ -186,6 +194,8 @@ func TestLoadValidation(t *testing.T) {
 		{"端口为负", "database:\n  port: -1\n"},
 		{"账号只填一半", "account:\n  username: admin\n"},
 		{"密码太短", "account:\n  username: admin\n  password: 123\n"},
+		{"代理认证只填用户名", "proxy_username: alice\n"},
+		{"代理认证只填密码", "proxy_password: s3cret\n"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

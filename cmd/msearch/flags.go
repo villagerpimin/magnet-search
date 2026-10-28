@@ -169,6 +169,10 @@ func parseArgs(args []string) (*cliOptions, error) {
 				opts.app.ProxyEngine = map[string]string{}
 			}
 			opts.app.ProxyEngine[strings.TrimSpace(k)] = strings.TrimSpace(v)
+		case "proxy-user":
+			opts.app.ProxyUsername = strings.TrimSpace(value)
+		case "proxy-pass":
+			opts.app.ProxyPassword = value
 		case "timeout":
 			d, err := time.ParseDuration(value)
 			if err != nil {

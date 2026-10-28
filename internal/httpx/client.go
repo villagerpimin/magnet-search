@@ -30,6 +30,10 @@ type Options struct {
 	UserAgent string
 	// InsecureSkipVerify 允许自签证书的 tracker/站点
 	InsecureSkipVerify bool
+	// ProxyUsername 代理认证用户名；为空表示不认证
+	ProxyUsername string
+	// ProxyPassword 代理认证密码（仅在用户名非空时生效）
+	ProxyPassword string
 }
 
 // DefaultUserAgent 是常见桌面浏览器 UA，对多数站点最不容易被拦截。
@@ -43,6 +47,9 @@ type Client struct {
 	retries int
 	proxies []string
 	direct  *http.Transport
+
+	proxyUsername string
+	proxyPassword string
 
 	proxyMu sync.Mutex
 	proxied map[string]*http.Transport
@@ -69,12 +76,14 @@ func New(opts Options) (*Client, error) {
 	}
 
 	c := &Client{
-		ua:       opts.UserAgent,
-		retries:  opts.Retries,
-		proxies:  normalizeProxies(opts.Proxies),
-		proxied:  make(map[string]*http.Transport),
-		lastCall: make(map[string]time.Time),
-		minGap:   350 * time.Millisecond,
+		ua:            opts.UserAgent,
+		retries:       opts.Retries,
+		proxies:       normalizeProxies(opts.Proxies),
+		proxied:       make(map[string]*http.Transport),
+		lastCall:      make(map[string]time.Time),
+		minGap:        350 * time.Millisecond,
+		proxyUsername: opts.ProxyUsername,
+		proxyPassword: opts.ProxyPassword,
 	}
 	c.direct = newTransport(opts.InsecureSkipVerify, opts.ConnectTimeout)
 	c.hc = &http.Client{Transport: c.direct, Timeout: opts.Timeout}
@@ -133,10 +142,25 @@ func (c *Client) transportFor(proxy string) *http.Transport {
 	if err != nil {
 		return c.direct
 	}
+	u = c.applyProxyAuth(u)
 	t := newTransport(false, 8*time.Second)
 	t.Proxy = http.ProxyURL(u)
 	c.proxied[proxy] = t
 	return t
+}
+
+// applyProxyAuth 决定代理地址最终携带的认证信息。
+// 内联凭据优先：代理地址里已有的 userinfo 保持不变；否则仅在
+// 配置了 ProxyUsername 时注入用户名/密码，未配置则不做任何处理（默认不认证）。
+func (c *Client) applyProxyAuth(u *url.URL) *url.URL {
+	if u.User != nil {
+		return u
+	}
+	if c.proxyUsername == "" {
+		return u
+	}
+	u.User = url.UserPassword(c.proxyUsername, c.proxyPassword)
+	return u
 }
 
 // Get 发起 GET 请求并返回响应体，网络失败会轮换代理重试。
