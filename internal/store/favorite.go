@@ -10,24 +10,53 @@ import (
 )
 
 // schemaAppFavorite 保存账号的磁力收藏。
+// 文本字段的容量按磁力站点可能出现的长标题、长备注放宽，避免写入时报 1406。
 const schemaAppFavorite = "CREATE TABLE IF NOT EXISTS app_favorite (" +
 	"id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT," +
 	"user_id BIGINT UNSIGNED NOT NULL DEFAULT 0," +
 	"info_hash CHAR(40) NOT NULL," +
-	"title VARCHAR(512) NOT NULL," +
-	"magnet TEXT NOT NULL," +
-	"size VARCHAR(32) NOT NULL DEFAULT ''," +
+	"title VARCHAR(1024) NOT NULL," +
+	"magnet MEDIUMTEXT NOT NULL," +
+	"size VARCHAR(64) NOT NULL DEFAULT ''," +
 	"size_bytes BIGINT NOT NULL DEFAULT 0," +
 	"seeders INT NOT NULL DEFAULT -1," +
 	"leechers INT NOT NULL DEFAULT -1," +
-	"sources VARCHAR(255) NOT NULL DEFAULT ''," +
-	"note VARCHAR(255) NOT NULL DEFAULT ''," +
+	"sources VARCHAR(512) NOT NULL DEFAULT ''," +
+	"note VARCHAR(1024) NOT NULL DEFAULT ''," +
 	"created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP," +
 	"updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP," +
 	"PRIMARY KEY (id)," +
 	"UNIQUE KEY uk_user_hash (user_id, info_hash)," +
 	"KEY idx_user_updated (user_id, updated_at)" +
 	") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4"
+
+// favoriteColumnUpgrades 是 app_favorite 的字段容量升级清单。
+// 旧库由 CREATE TABLE IF NOT EXISTS 建表后不会自动修改字段，需要逐列校正。
+var favoriteColumnUpgrades = []struct {
+	// column 列名
+	column string
+	// want 期望的 COLUMN_TYPE（忽略大小写比较）
+	want string
+	// ddl 类型不一致时执行的迁移语句
+	ddl string
+}{
+	{"title", "varchar(1024)", "ALTER TABLE app_favorite MODIFY COLUMN title VARCHAR(1024) NOT NULL"},
+	{"magnet", "mediumtext", "ALTER TABLE app_favorite MODIFY COLUMN magnet MEDIUMTEXT NOT NULL"},
+	{"size", "varchar(64)", "ALTER TABLE app_favorite MODIFY COLUMN size VARCHAR(64) NOT NULL DEFAULT ''"},
+	{"sources", "varchar(512)", "ALTER TABLE app_favorite MODIFY COLUMN sources VARCHAR(512) NOT NULL DEFAULT ''"},
+	{"note", "varchar(1024)", "ALTER TABLE app_favorite MODIFY COLUMN note VARCHAR(1024) NOT NULL DEFAULT ''"},
+}
+
+// ensureFavoriteColumns 把旧版本建窄的收藏字段放宽到当前定义。
+// 只有实际类型不一致时才执行 ALTER，已升级过的库启动时不会反复迁移。
+func (s *Store) ensureFavoriteColumns(ctx context.Context) error {
+	for _, up := range favoriteColumnUpgrades {
+		if err := s.ensureColumnType(ctx, "app_favorite", up.column, up.want, up.ddl); err != nil {
+			return err
+		}
+	}
+	return nil
+}
 
 // Favorite 是一条收藏记录。
 type Favorite struct {
@@ -104,8 +133,8 @@ func (s *Store) AddFavorite(ctx context.Context, f Favorite) (int64, error) {
 			"ON DUPLICATE KEY UPDATE title = VALUES(title), magnet = VALUES(magnet), size = VALUES(size), "+
 			"size_bytes = VALUES(size_bytes), seeders = VALUES(seeders), leechers = VALUES(leechers), "+
 			"sources = VALUES(sources), updated_at = CURRENT_TIMESTAMP, id = LAST_INSERT_ID(id)",
-		f.UserID, f.InfoHash, truncate(f.Title, 512), f.Magnet, truncate(f.Size, 32),
-		f.SizeBytes, f.Seeders, f.Leechers, truncate(f.Sources, 255), truncate(f.Note, 255),
+		f.UserID, f.InfoHash, truncate(f.Title, 1024), f.Magnet, truncate(f.Size, 64),
+		f.SizeBytes, f.Seeders, f.Leechers, truncate(f.Sources, 512), truncate(f.Note, 1024),
 	)
 	if err != nil {
 		return 0, fmt.Errorf("写入收藏失败: %w", err)
@@ -127,7 +156,7 @@ func (s *Store) UpdateFavorite(ctx context.Context, userID, id int64, title, not
 	}
 	res, err := s.db.ExecContext(ctx,
 		"UPDATE app_favorite SET title = ?, note = ? WHERE id = ? AND user_id = ?",
-		truncate(title, 512), truncate(note, 255), id, userID,
+		truncate(title, 1024), truncate(note, 1024), id, userID,
 	)
 	if err != nil {
 		return false, fmt.Errorf("修改收藏失败: %w", err)

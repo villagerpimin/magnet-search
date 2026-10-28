@@ -382,3 +382,43 @@ func TestFavoriteLifecycle(t *testing.T) {
 		t.Fatalf("按哈希删除失败: removed=%v err=%v", removed, err)
 	}
 }
+
+// TestFavoriteAcceptsLongFields 校验超长标题、备注、来源与磁力链接都能完整写入。
+// 这些值超过旧版字段容量，旧表会报 1406；同时验证启动迁移已把字段放宽。
+func TestFavoriteAcceptsLongFields(t *testing.T) {
+	st := openTestStore(t)
+	ctx := context.Background()
+
+	// 旧 magnet 列是 TEXT（64KB 上限），这里用 70KB 确认已放宽到 MEDIUMTEXT。
+	longMagnet := "magnet:?xt=urn:btih:232cd67eb3ffbd7c37bf9ec3ee887417e5ae1ee6&dn=" + strings.Repeat("a", 70000)
+	f := Favorite{
+		UserID:   1,
+		InfoHash: "232cd67eb3ffbd7c37bf9ec3ee887417e5ae1ee6",
+		Title:    strings.Repeat("t", 700),
+		Magnet:   longMagnet,
+		Size:     strings.Repeat("9", 60),
+		Sources:  strings.Repeat("s", 500),
+		Note:     strings.Repeat("n", 900),
+	}
+	if _, err := st.AddFavorite(ctx, f); err != nil {
+		t.Fatalf("写入长字段收藏失败: %v", err)
+	}
+	saved, err := st.FavoriteByHash(ctx, 1, f.InfoHash)
+	if err != nil {
+		t.Fatalf("读取收藏失败: %v", err)
+	}
+	if saved.Title != f.Title || saved.Note != f.Note || saved.Sources != f.Sources ||
+		saved.Size != f.Size || saved.Magnet != f.Magnet {
+		t.Errorf("长字段被截断: title=%d note=%d sources=%d size=%d magnet=%d",
+			len(saved.Title), len(saved.Note), len(saved.Sources), len(saved.Size), len(saved.Magnet))
+	}
+
+	longTitle := strings.Repeat("u", 900)
+	if updated, err := st.UpdateFavorite(ctx, 1, saved.ID, longTitle, f.Note); err != nil || !updated {
+		t.Fatalf("修改超长标题失败: updated=%v err=%v", updated, err)
+	}
+	saved, _ = st.FavoriteByHash(ctx, 1, f.InfoHash)
+	if saved.Title != longTitle {
+		t.Errorf("修改后标题长度 = %d，期望 %d", len(saved.Title), len(longTitle))
+	}
+}

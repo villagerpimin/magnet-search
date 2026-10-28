@@ -180,7 +180,8 @@ func (s *Store) ensureSchema(ctx context.Context) error {
 		"ALTER TABLE search_log ADD COLUMN user_id BIGINT UNSIGNED NOT NULL DEFAULT 0 AFTER id"); err != nil {
 		return err
 	}
-	return nil
+	// 旧库的收藏字段可能建得偏窄，启动时统一放宽，避免长标题写入失败。
+	return s.ensureFavoriteColumns(ctx)
 }
 
 // ensureColumn 在列不存在时执行迁移语句。
@@ -204,6 +205,31 @@ func (s *Store) ensureColumn(ctx context.Context, table, column, ddl string) err
 			return nil
 		}
 		return fmt.Errorf("迁移 %s.%s 失败: %w", table, column, err)
+	}
+	return nil
+}
+
+// ensureColumnType 在列类型与期望不一致时执行迁移语句。
+// want 与 information_schema.COLUMNS 的 COLUMN_TYPE 比较（忽略大小写），
+// 例如 "varchar(1024)" 或 "mediumtext"；迁移语句本身必须幂等。
+func (s *Store) ensureColumnType(ctx context.Context, table, column, want, ddl string) error {
+	var got string
+	err := s.db.QueryRowContext(ctx,
+		"SELECT COLUMN_TYPE FROM information_schema.COLUMNS "+
+			"WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ?",
+		table, column,
+	).Scan(&got)
+	switch {
+	case errors.Is(err, sql.ErrNoRows):
+		return nil
+	case err != nil:
+		return fmt.Errorf("检查 %s.%s 失败: %w", table, column, err)
+	}
+	if strings.EqualFold(got, want) {
+		return nil
+	}
+	if _, err := s.db.ExecContext(ctx, ddl); err != nil {
+		return fmt.Errorf("升级 %s.%s 失败: %w", table, column, err)
 	}
 	return nil
 }
