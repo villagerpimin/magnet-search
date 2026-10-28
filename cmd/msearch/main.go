@@ -7,7 +7,7 @@ import (
 )
 
 // version 是程序版本号。
-const version = "2.1.0"
+const version = "2.1.1"
 
 func main() {
 	args := os.Args[1:]
