@@ -20,6 +20,8 @@
   --dead: #f85149;
   --unknown: #6e7681;
   --radius: 10px;
+  --nav-h: 58px;
+  --nav-offset: 0px;
   --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
 }
 @media (prefers-color-scheme: light) {
@@ -60,7 +62,6 @@ header {
 .health .dot.bad { background: var(--dead); }
 .health button { color: var(--muted); text-decoration: underline dotted; }
 .health button:hover { color: var(--text); }
-#accountChip { display: inline-flex; align-items: center; gap: 10px; }
 
 /* 搜索区 */
 .searchwrap { padding: 18px 20px 0; }
@@ -129,7 +130,7 @@ header {
 .toggle input { accent-color: var(--accent); }
 
 /* 结果区 */
-main { flex: 1; padding: 4px 20px 28px; scroll-margin-top: 64px; }
+main { flex: 1; padding: 4px 20px calc(28px + var(--nav-h) + var(--nav-offset) + env(safe-area-inset-bottom)); scroll-margin-top: 64px; }
 .status { color: var(--muted); font-size: 12.5px; padding: 6px 2px 10px; display: flex; gap: 14px; flex-wrap: wrap; align-items: center; }
 .status .warn { color: var(--cold); }
 .paging-hint { display: inline-flex; align-items: center; gap: 6px; }
@@ -215,12 +216,48 @@ main { flex: 1; padding: 4px 20px 28px; scroll-margin-top: 64px; }
 .mask.open { display: block; }
 .hint { color: var(--muted); font-size: 12px; margin-top: 14px; line-height: 1.7; }
 .toast {
-  position: fixed; bottom: 22px; left: 50%; transform: translateX(-50%);
+  position: fixed; bottom: calc(66px + var(--nav-h) + var(--nav-offset) + env(safe-area-inset-bottom)); left: 50%; transform: translateX(-50%);
   background: var(--panel); border: 1px solid var(--accent); color: var(--text);
   padding: 8px 16px; border-radius: 999px; font-size: 13px; opacity: 0; pointer-events: none;
   transition: opacity .2s; z-index: 60;
 }
 .toast.show { opacity: 1; }
+
+/* 底部导航：固定栏 + 桌面端居中容器 */
+.bottomnav {
+  position: fixed; left: 0; right: 0; bottom: 0; z-index: 25;
+  background: var(--panel); border-top: 1px solid var(--border);
+  padding-bottom: env(safe-area-inset-bottom);
+}
+.bottomnav-inner {
+  max-width: 520px; margin: 0 auto; padding: 0 6px;
+  height: var(--nav-h); display: flex; align-items: stretch;
+}
+.bnav-item {
+  flex: 1 1 0; min-width: 0; min-height: 44px; margin: 6px 4px;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px;
+  border-radius: 11px; color: var(--muted); font-size: 11.5px; line-height: 1.1;
+  transition: color .15s ease, background .15s ease;
+}
+.bnav-item svg { width: 20px; height: 20px; display: block; }
+.bnav-item:hover { color: var(--text); }
+.bnav-item.on { color: var(--text); background: var(--accent-dim); }
+.bnav-item:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* 回到顶部：浮在底部导航上方，默认隐藏 */
+.backtop {
+  position: fixed; right: 16px; bottom: calc(14px + var(--nav-h) + var(--nav-offset) + env(safe-area-inset-bottom));
+  z-index: 26; width: 42px; height: 42px; border-radius: 50%;
+  display: grid; place-items: center;
+  background: var(--panel); border: 1px solid var(--border); color: var(--muted);
+  box-shadow: 0 6px 18px rgba(0,0,0,.28);
+  opacity: 0; visibility: hidden; pointer-events: none; transform: translateY(8px);
+  transition: opacity .18s ease, transform .18s ease, visibility .18s, color .15s ease, border-color .15s ease;
+}
+.backtop.show { opacity: 1; visibility: visible; pointer-events: auto; transform: none; }
+.backtop:hover { color: var(--text); border-color: var(--accent); }
+.backtop:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.backtop svg { width: 20px; height: 20px; display: block; }
 
 /* 详情抽屉的关闭按钮 */
 .drawer-head {
@@ -308,6 +345,41 @@ main { flex: 1; padding: 4px 20px 28px; scroll-margin-top: 64px; }
 }
 .fav-edit input:focus { border-color: var(--accent); }
 
+/* 账号抽屉 */
+.account-card {
+  display: flex; align-items: center; gap: 12px;
+  margin-top: 4px; padding: 12px 14px; border-radius: 10px;
+  background: var(--panel-2); border: 1px solid var(--border);
+}
+.account-card .avatar {
+  width: 40px; height: 40px; border-radius: 50%; flex: none;
+  display: grid; place-items: center; font-size: 16px; font-weight: 650;
+  background: var(--accent-dim); color: var(--text);
+}
+.account-card .aname { font-size: 14.5px; font-weight: 600; word-break: break-all; }
+.account-card .arole { margin-top: 2px; color: var(--muted); font-size: 12px; }
+.account-section { margin: 20px 0 8px; font-size: 13px; font-weight: 600; color: var(--muted); }
+.account-form { display: flex; flex-direction: column; gap: 10px; }
+.account-field span { display: block; margin-bottom: 5px; color: var(--muted); font-size: 12.5px; }
+.account-field input {
+  width: 100%; padding: 9px 11px; font: inherit; font-size: 13.5px;
+  background: var(--panel-2); color: var(--text); border: 1px solid var(--border);
+  border-radius: 8px; outline: none;
+}
+.account-field input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-dim); }
+.account-msg { color: var(--dead); font-size: 12.5px; min-height: 17px; }
+.account-save {
+  padding: 10px; border-radius: 9px; background: var(--accent); color: #fff;
+  font-weight: 600; font-size: 14px;
+}
+.account-save:disabled { opacity: .6; cursor: progress; }
+.account-danger { margin-top: 22px; padding-top: 16px; border-top: 1px solid var(--border); }
+.account-logout {
+  width: 100%; padding: 10px; border-radius: 9px; font-size: 13.5px; font-weight: 600;
+  color: var(--dead); border: 1px solid var(--dead);
+}
+.account-logout:hover { background: rgba(248,81,73,.08); }
+
 /* 文件列表 */
 .files { margin-top: 18px; }
 .files h4 { margin: 0 0 6px; font-size: 13px; font-weight: 600; color: var(--muted); }
@@ -348,7 +420,7 @@ main { flex: 1; padding: 4px 20px 28px; scroll-margin-top: 64px; }
   .searchbar input { padding: 11px 12px; font-size: 16px; }
   .searchbar button { padding: 0 15px; font-size: 14px; }
 
-  main { padding: 0 12px 22px; }
+  main { padding: 0 12px calc(22px + var(--nav-h) + var(--nav-offset) + env(safe-area-inset-bottom)); }
   .filters { gap: 7px 10px; padding: 10px 0; font-size: 12px; }
   .filters .grp { gap: 5px; flex-wrap: wrap; }
   .filters input[type=text] { width: 100%; min-width: 0; }
@@ -388,7 +460,33 @@ main { flex: 1; padding: 4px 20px 28px; scroll-margin-top: 64px; }
   .copyrow .mini { width: 100%; padding: 9px; }
   .parts .row { grid-template-columns: 62px 1fr 42px; }
 
+  .bottomnav-inner { padding: 0 2px; }
+  .bnav-item { margin: 5px 3px; font-size: 11px; }
+  .backtop { right: 12px; }
+  /* 16px 可避免 iOS 聚焦时自动放大页面 */
+  .account-field input { font-size: 16px; }
+  .account-save, .account-logout { padding: 12px; font-size: 14px; }
+
   .gate-card { padding: 20px 16px 16px; }
+}
+
+/* 桌面端：下栏改为居中悬浮 dock，避免整条横栏在大屏上显得空旷 */
+@media (min-width: 641px) {
+  :root { --nav-offset: 14px; }
+  .bottomnav {
+    left: 50%; right: auto; bottom: var(--nav-offset);
+    width: min(480px, calc(100vw - 48px)); transform: translateX(-50%);
+    border: 1px solid var(--border); border-radius: 16px;
+    padding-bottom: 0; overflow: hidden;
+    box-shadow: 0 14px 34px rgba(0,0,0,.32);
+  }
+  .bottomnav-inner { height: var(--nav-h); padding: 0 8px; }
+  .bnav-item { margin: 7px 4px; }
+  .bnav-item:not(.on):hover { background: var(--panel-2); }
+  .backtop { right: 24px; }
+}
+@media (prefers-color-scheme: light) and (min-width: 641px) {
+  .bottomnav { box-shadow: 0 10px 30px rgba(15,23,42,.12); }
 }
 </style>
 </head>
@@ -400,12 +498,6 @@ main { flex: 1; padding: 4px 20px 28px; scroll-margin-top: 64px; }
     <span class="dots" id="healthDots"></span>
     <span id="healthText">引擎状态未知</span>
     <button id="healthBtn" type="button">检测</button>
-    <button id="favBtn" type="button" title="收藏管理" style="display:none">收藏</button>
-    <span id="accountChip" style="display:none">
-      <button id="loginBtn" type="button" title="登录">登录</button>
-      <button id="accountBtn" type="button" title="账号设置">账号</button>
-      <button id="logoutBtn" type="button" title="退出登录">退出</button>
-    </span>
   </div>
 </header>
 
@@ -486,6 +578,27 @@ main { flex: 1; padding: 4px 20px 28px; scroll-margin-top: 64px; }
   <div class="pager" id="pager"></div>
 </main>
 
+<nav class="bottomnav" id="bottomNav" aria-label="底部导航">
+  <div class="bottomnav-inner">
+    <button class="bnav-item on" id="bnavHome" data-bnav="home" type="button" aria-current="page">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 10.2 12 3l9 7.2"/><path d="M5 9.5V20a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V9.5"/><path d="M10 21v-5h4v5"/></svg>
+      <span>首页</span>
+    </button>
+    <button class="bnav-item" id="bnavFav" data-bnav="fav" type="button">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3.6l2.6 5.3 5.9.9-4.3 4.1 1 5.8-5.2-2.7-5.2 2.7 1-5.8L3.5 9.8l5.9-.9z"/></svg>
+      <span>收藏</span>
+    </button>
+    <button class="bnav-item" id="bnavAccount" data-bnav="account" type="button">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="8" r="3.6"/><path d="M5 20c0-3.3 3.1-6 7-6s7 2.7 7 6"/></svg>
+      <span>账号</span>
+    </button>
+  </div>
+</nav>
+
+<button class="backtop" id="backTop" type="button" aria-label="回到顶部" title="回到顶部">
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 19V5"/><path d="M6 11l6-6 6 6"/></svg>
+</button>
+
 <div class="mask" id="mask"></div>
 <aside class="drawer" id="drawer">
   <div class="drawer-head">
@@ -512,6 +625,40 @@ main { flex: 1; padding: 4px 20px 28px; scroll-margin-top: 64px; }
   <div id="favList"></div>
   <div class="hint">在搜索结果或详情里点「☆ 收藏」即可加入；这里可以复制磁力、按标题搜索、编辑标题与备注、删除收藏。</div>
 </aside>
+<aside class="drawer" id="accountDrawer">
+  <div class="drawer-head">
+    <h3>账号</h3>
+    <button class="drawer-close" id="accountClose" type="button" aria-label="关闭">✕</button>
+  </div>
+  <div class="account-card">
+    <span class="avatar">◉</span>
+    <div>
+      <div class="aname" id="accountName">-</div>
+      <div class="arole">当前登录账号</div>
+    </div>
+  </div>
+  <h4 class="account-section">修改账号密码</h4>
+  <form class="account-form" id="accountForm">
+    <label class="account-field">
+      <span>用户名</span>
+      <input id="acctUser" type="text" autocomplete="username" required>
+    </label>
+    <label class="account-field">
+      <span>新密码（留空表示不修改）</span>
+      <input id="acctPass" type="password" autocomplete="new-password" placeholder="至少 6 位">
+    </label>
+    <label class="account-field">
+      <span>确认新密码</span>
+      <input id="acctPass2" type="password" autocomplete="new-password" placeholder="再次输入新密码">
+    </label>
+    <div class="account-msg" id="acctErr"></div>
+    <button class="account-save" id="acctSave" type="submit">保存修改</button>
+  </form>
+  <div class="account-danger">
+    <button class="account-logout" id="acctLogout" type="button">退出登录</button>
+    <div class="hint">退出后搜索历史与收藏仍保存在服务器上，下次登录可继续使用。</div>
+  </div>
+</aside>
 <div class="gate" id="gate">
   <form class="gate-card" id="gateForm" autocomplete="on">
     <div class="gate-title" id="gateTitle">登录</div>
@@ -537,7 +684,7 @@ main { flex: 1; padding: 4px 20px 28px; scroll-margin-top: 64px; }
       <a href="#" id="gateLoginBack">已有账号？登录</a>
     </div>
     <div class="gate-foot" id="gateFoot" style="display:none">
-      <a href="#" id="gateLogout">退出登录</a>
+      <a href="#" id="gateLogout">取消</a>
     </div>
   </form>
 </div>
@@ -569,6 +716,7 @@ let favorites = [];
 let favoriteHashes = new Set();
 let currentDetail = null;
 let editingFavId = 0;
+let bottomTab = "home";
 const fileCache = new Map();
 
 const VERDICT = {
@@ -790,6 +938,7 @@ async function openFavDrawer() {
     toast("收藏需要启用数据库");
     return;
   }
+  setBottomTab("fav");
   closeDetail();
   $("favFilter").value = "";
   await loadFavorites();
@@ -801,6 +950,8 @@ async function openFavDrawer() {
 function closeFavDrawer() {
   $("favDrawer").classList.remove("open");
   syncMask();
+  // 收藏抽屉无论从哪个入口关闭，底部选中态都回到首页
+  setBottomTab("home");
 }
 
 function renderFavorites() {
@@ -1370,9 +1521,143 @@ function closeDetail() {
 
 // syncMask 根据抽屉状态统一控制遮罩，避免关掉一个抽屉后另一个还开着却没有遮罩。
 function syncMask() {
-  const open = $("drawer").classList.contains("open") || $("favDrawer").classList.contains("open");
+  const open = $("drawer").classList.contains("open") ||
+    $("favDrawer").classList.contains("open") ||
+    $("accountDrawer").classList.contains("open");
   $("mask").classList.toggle("open", open);
+  // 抽屉开合会改变遮罩状态，回到顶部按钮随之重新判定
+  updateBackTop();
 }
+
+/* ---------- 底部导航与回到顶部 ---------- */
+// setBottomTab 切换底部三栏的选中态，并同步 aria-current。
+function setBottomTab(name) {
+  bottomTab = name;
+  document.querySelectorAll("[data-bnav]").forEach((btn) => {
+    const on = btn.dataset.bnav === name;
+    btn.classList.toggle("on", on);
+    if (on) btn.setAttribute("aria-current", "page");
+    else btn.removeAttribute("aria-current");
+  });
+}
+
+// updateBackTop 只在页面下滚且没有抽屉遮罩时显示回到顶部按钮。
+function updateBackTop() {
+  const btn = $("backTop");
+  if (!btn) return;
+  const show = window.scrollY > 320 && !$("mask").classList.contains("open");
+  btn.classList.toggle("show", show);
+}
+
+window.addEventListener("scroll", updateBackTop, { passive: true });
+window.addEventListener("load", updateBackTop);
+$("backTop").onclick = () => window.scrollTo({ top: 0, behavior: "smooth" });
+
+// 首页：收起抽屉并回到顶部，不聚焦搜索框（避免手机上弹出键盘）
+$("bnavHome").onclick = () => {
+  closeDetail();
+  closeFavDrawer();
+  closeAccountDrawer();
+  setBottomTab("home");
+  window.scrollTo({ top: 0, behavior: "smooth" });
+};
+
+// 收藏：未启用数据库时提示并保持首页选中
+$("bnavFav").onclick = () => {
+  if (!authState.db_enabled) {
+    toast("收藏需要启用数据库");
+    setBottomTab("home");
+    return;
+  }
+  openFavDrawer();
+};
+
+// 账号：未启用数据库时提示；已登录打开账号抽屉，未登录进入登录/首次设置
+$("bnavAccount").onclick = () => {
+  if (!authState.db_enabled) {
+    toast("账号需要启用数据库");
+    return;
+  }
+  if (authState.logged_in) {
+    openAccountDrawer();
+    return;
+  }
+  $("gateUser").value = "";
+  $("gatePass").value = "";
+  $("gatePass2").value = "";
+  showGate(authState.needs_setup ? "setup" : "login");
+  setBottomTab("account");
+};
+
+/* ---------- 账号抽屉：修改账号密码与退出登录 ---------- */
+// openAccountDrawer 打开账号抽屉并同步选中态。
+function openAccountDrawer() {
+  if (!authState.logged_in) return;
+  $("accountName").textContent = authState.username || "-";
+  $("acctUser").value = authState.username || "";
+  $("acctPass").value = "";
+  $("acctPass2").value = "";
+  $("acctErr").textContent = "";
+  closeDetail();
+  closeFavDrawer();
+  $("accountDrawer").classList.add("open");
+  syncMask();
+  setBottomTab("account");
+}
+
+// closeAccountDrawer 收起账号抽屉；从账号栏打开的关闭后回到首页。
+function closeAccountDrawer() {
+  $("accountDrawer").classList.remove("open");
+  syncMask();
+  if (bottomTab === "account") setBottomTab("home");
+}
+
+$("accountClose").onclick = closeAccountDrawer;
+
+// 修改账号密码：密码留空表示保持不变，服务端会重新签发会话。
+$("accountForm").onsubmit = async (e) => {
+  e.preventDefault();
+  const username = $("acctUser").value.trim();
+  const password = $("acctPass").value;
+  const password2 = $("acctPass2").value;
+  if (!username) {
+    $("acctErr").textContent = "请输入用户名";
+    return;
+  }
+  if (password !== password2) {
+    $("acctErr").textContent = "两次输入的新密码不一致";
+    return;
+  }
+  $("acctSave").disabled = true;
+  try {
+    const resp = await fetch("/api/account", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ username, password }),
+    });
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok) throw new Error(data.error || "保存失败");
+    $("acctPass").value = "";
+    $("acctPass2").value = "";
+    await loadAuth();
+    await refreshUserData();
+    $("accountName").textContent = authState.username || username;
+    toast("账号已保存");
+  } catch (err) {
+    $("acctErr").textContent = err.message || String(err);
+  } finally {
+    $("acctSave").disabled = false;
+  }
+};
+
+// 退出登录：清掉会话、收起抽屉并刷新账号相关数据。
+$("acctLogout").onclick = async () => {
+  await fetch("/api/logout", { method: "POST" });
+  closeAccountDrawer();
+  await loadAuth();
+  await refreshUserData();
+  toast("已退出登录");
+};
 
 function renderPager(data) {
   const box = $("pager");
@@ -1477,19 +1762,18 @@ async function loadAuth() {
   return authState;
 }
 
-// applyAuth 依据认证状态调整界面：账号入口、收藏入口与登录遮罩。
+// applyAuth 依据认证状态调整界面：账号入口与登录遮罩。
 function applyAuth() {
-  $("accountChip").style.display = authState.db_available ? "" : "none";
-  $("favBtn").style.display = authState.db_enabled ? "" : "none";
-  $("accountBtn").style.display = authState.logged_in ? "" : "none";
-  $("logoutBtn").style.display = authState.logged_in ? "" : "none";
-  // 数据库记录关闭时不要求也不支持登录，避免出现“登录成功但没有会话”的假入口
-  $("loginBtn").style.display = authState.db_enabled && !authState.logged_in ? "" : "none";
+  // 账号抽屉只对已登录用户开放，会话失效时一并收起
+  if (!authState.logged_in) closeAccountDrawer();
+  $("accountName").textContent = authState.username || "-";
 
   if (gateForced()) {
     showGate(authState.needs_setup ? "setup" : "login");
   } else {
     $("gate").classList.remove("open");
+    // 账号面板被收起后，底部导航回到首页（收藏抽屉打开时不打扰）
+    if (bottomTab === "account") setBottomTab("home");
   }
 }
 
@@ -1498,29 +1782,25 @@ function gateForced() {
   return authState.db_enabled && authState.require_login && (authState.needs_setup || !authState.logged_in);
 }
 
-// showGate 显示登录/首次设置/注册/修改账号面板。
+// showGate 显示登录/首次设置/注册面板。
 function showGate(mode) {
   gateMode = mode;
   const texts = {
     login:    { title: "登录", sub: "登录后可保存搜索历史与收藏，并管理账号。", submit: "登录", confirm: false },
     setup:    { title: "首次设置登录账号", sub: "服务已开启数据库。请先设置一个账号，之后可以用它登录并管理账号。", submit: "设置并登录", confirm: true },
     register: { title: "注册账号", sub: "注册并登录后即可保存搜索历史与收藏，账号信息会保存到数据库。", submit: "注册并登录", confirm: true },
-    change:   { title: "修改账号密码", sub: "留空密码则只改用户名；修改后立即生效。", submit: "保存", confirm: true },
   };
   const t = texts[mode] || texts.login;
   $("gateTitle").textContent = t.title;
   $("gateSub").textContent = t.sub;
   $("gateSubmit").textContent = t.submit;
   $("gateConfirmWrap").style.display = t.confirm ? "" : "none";
-  // 修改账号时密码可以留空表示保持原密码，因此动态取消 HTML 必填约束。
-  $("gatePass").required = mode !== "change";
   $("gatePass").autocomplete = mode === "login" ? "current-password" : "new-password";
   $("gateErr").textContent = "";
-  // 强制登录时不允许关闭；主动点开的登录/设置/注册面板可以取消。
-  $("gateFoot").style.display = mode === "change" || !gateForced() ? "" : "none";
+  // 强制登录时不允许关闭；主动点开的登录/注册面板可以取消。
+  $("gateFoot").style.display = !gateForced() ? "" : "none";
   $("gateRegisterWrap").style.display = mode === "login" && authState.allow_register ? "" : "none";
   $("gateLoginWrap").style.display = mode === "register" ? "" : "none";
-  $("gateLogout").textContent = "取消";
   $("gate").classList.add("open");
   setTimeout(() => $("gateUser").focus(), 60);
 }
@@ -1541,13 +1821,7 @@ $("gateForm").onsubmit = async (e) => {
     $("gateErr").textContent = "请输入用户名";
     return;
   }
-  if (gateMode === "change") {
-    // 修改账号时密码留空表示保持原密码；只有输入了新密码才校验确认密码。
-    if ((password || password2) && password !== password2) {
-      $("gateErr").textContent = "两次输入的密码不一致";
-      return;
-    }
-  } else if (gateMode !== "login") {
+  if (gateMode !== "login") {
     if (!password) {
       $("gateErr").textContent = "请输入密码";
       return;
@@ -1570,6 +1844,7 @@ $("gateForm").onsubmit = async (e) => {
     $("gatePass").value = "";
     $("gatePass2").value = "";
     $("gate").classList.remove("open");
+    setBottomTab("home");
     await loadAuth();
     await refreshUserData();
     toast(gateMode === "login" ? "已登录" : gateMode === "register" ? "注册成功" : "账号已保存");
@@ -1578,30 +1853,6 @@ $("gateForm").onsubmit = async (e) => {
   } finally {
     $("gateSubmit").disabled = false;
   }
-};
-
-// 账号入口：修改用户名/密码
-$("accountBtn").onclick = () => {
-  $("gateUser").value = authState.username || "";
-  $("gatePass").value = "";
-  $("gatePass2").value = "";
-  showGate("change");
-};
-
-// 未登录时的登录入口：没有账号则直接进入首次设置。
-$("loginBtn").onclick = () => {
-  $("gateUser").value = "";
-  $("gatePass").value = "";
-  $("gatePass2").value = "";
-  showGate(authState.needs_setup ? "setup" : "login");
-};
-
-// 退出登录：清掉会话后重新读取认证状态。
-$("logoutBtn").onclick = async () => {
-  await fetch("/api/logout", { method: "POST" });
-  await loadAuth();
-  await refreshUserData();
-  toast("已退出登录");
 };
 
 // 登录面板里的注册入口，以及注册面板返回登录。
@@ -1618,17 +1869,11 @@ $("gateLoginBack").onclick = (e) => {
   showGate("login");
 };
 
-// 取消（仅修改账号时）/ 退出登录
-$("gateLogout").onclick = async (e) => {
+// 取消登录/注册面板
+$("gateLogout").onclick = (e) => {
   e.preventDefault();
-  if (gateMode === "change" || !gateForced()) {
-    $("gate").classList.remove("open");
-    return;
-  }
-  await fetch("/api/logout", { method: "POST" });
-  await loadAuth();
-  await refreshUserData();
-  toast("已退出登录");
+  $("gate").classList.remove("open");
+  setBottomTab("home");
 };
 
 // 手机端折叠筛选面板，摘要里显示当前选中几个引擎
@@ -1648,7 +1893,6 @@ $("filtersToggle").onclick = () => {
 $("dClose").onclick = closeDetail;
 $("favClose").onclick = closeFavDrawer;
 $("historyClear").onclick = clearHistory;
-$("favBtn").onclick = openFavDrawer;
 $("favFilter").oninput = renderFavorites;
 
 /* ---------- 筛选提示：固定定位并自动避开视口边缘 ---------- */
@@ -1740,11 +1984,11 @@ $("perPage").onchange = () => {
 };
 $("applyProxy").onclick = applySettings;
 $("healthBtn").onclick = checkHealth;
-$("mask").onclick = () => { closeDetail(); closeFavDrawer(); };
+$("mask").onclick = () => { closeDetail(); closeFavDrawer(); closeAccountDrawer(); };
 $("q").addEventListener("keydown", (e) => { if (e.key === "Enter") search(1); });
 
 document.addEventListener("keydown", (e) => {
-  if (e.key === "Escape") { closeDetail(); closeFavDrawer(); hideTip(); return; }
+  if (e.key === "Escape") { closeDetail(); closeFavDrawer(); closeAccountDrawer(); hideTip(); return; }
   // 正在输入框里打字时不抢焦点，否则代理地址之类的没法直接敲
   const el = document.activeElement;
   const tag = el ? el.tagName : "";
