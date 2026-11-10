@@ -363,9 +363,10 @@ func (m *merger) add(query string, results []model.Result) []aggregate.Candidate
 		}
 		c := aggregate.Candidate{Result: r, Live: model.NewLiveness(hash), Sources: []string{r.Source}}
 		rel := aggregate.ComputeRelevance(aggregate.RelevanceInput{
-			Query: query,
-			Title: r.Title,
-			Rank:  r.Rank,
+			Query:        query,
+			Title:        r.Title,
+			Rank:         r.Rank,
+			IndexMatched: r.IndexMatched,
 		})
 		if !rel.Passed {
 			// 相关度不达标的直接丢弃，不产出

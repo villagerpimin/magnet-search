@@ -182,7 +182,7 @@ func runCheck(args []string) int {
 		}
 		start := time.Now()
 		engCtx, engCancel := context.WithTimeout(ctx, 30*time.Second)
-		results, err := e.Search(engCtx, engine.Options{Query: "ubuntu", Limit: 5})
+		results, err := e.Search(engCtx, engine.Options{Query: spec.ProbeTerm(), Limit: 5})
 		engCancel()
 		rep := report{name: spec.Name, region: string(spec.Region), elapsed: time.Since(start), count: len(results)}
 		if err != nil {

@@ -229,3 +229,27 @@ func TestSearchVariantsNormalizesAndFallsBack(t *testing.T) {
 		t.Errorf("空变体列表应回退到 opts.Query，实际 %v", queries)
 	}
 }
+
+// TestSearchVariantsMarksSplitVariants 校验拆出来的词被标为变体，完整查询不标。
+func TestSearchVariantsMarksSplitVariants(t *testing.T) {
+	var mu sync.Mutex
+	seen := make(map[string]bool)
+	e := &fakeVariantEngine{
+		name: "fake",
+		search: func(opts Options) ([]model.Result, error) {
+			mu.Lock()
+			seen[opts.Query] = opts.Variant
+			mu.Unlock()
+			return nil, nil
+		},
+	}
+	SearchVariants(context.Background(), []Engine{e}, Options{Query: "ABCD-999"},
+		[]string{"ABCD-999", "ABCD", "999"}, nil)
+
+	if seen["ABCD-999"] {
+		t.Error("完整查询不该标成变体")
+	}
+	if !seen["999"] || !seen["ABCD"] {
+		t.Errorf("拆出来的词应标成变体，实际 %v", seen)
+	}
+}

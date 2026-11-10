@@ -88,7 +88,12 @@ func Rank(cands []Candidate, opts RankOptions) Ranked {
 	var dropped []Dropped
 
 	for _, c := range cands {
-		rel := ComputeRelevance(RelevanceInput{Query: opts.Query, Title: c.Result.Title, Rank: c.Result.Rank})
+		rel := ComputeRelevance(RelevanceInput{
+			Query:        opts.Query,
+			Title:        c.Result.Title,
+			Rank:         c.Result.Rank,
+			IndexMatched: c.Result.IndexMatched,
+		})
 		c.Relevance = rel.Score
 		if !rel.Passed {
 			dropped = append(dropped, Dropped{Candidate: c, Reason: "相关度不足：" + rel.Reason})

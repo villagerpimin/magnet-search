@@ -237,3 +237,24 @@ func TestComputeRelevanceAllowsPartialSplitTerms(t *testing.T) {
 		t.Errorf("完全无命中的原因 = %q，期望 %q", noHit.Reason, "没有任何查询词命中")
 	}
 }
+
+// TestComputeRelevanceAllowsIndexMatched 校验引擎按自身索引匹配过的结果不会被字面匹配门淘汰。
+// 场景：中文演员名检索日文片名，标题里不会出现查询词，只能靠引擎排序位置判断相关性。
+func TestComputeRelevanceAllowsIndexMatched(t *testing.T) {
+	in := RelevanceInput{Query: "葵司", Title: "女上司の誘惑 松嶋葵 jux-879.avi", Rank: 0}
+	if ComputeRelevance(in).Passed {
+		t.Fatal("没有引擎索引标记时，字面完全不命中应被淘汰")
+	}
+	in.IndexMatched = true
+	got := ComputeRelevance(in)
+	if !got.Passed {
+		t.Fatalf("引擎索引匹配过的结果应通过，原因: %s", got.Reason)
+	}
+	if got.Score <= 0 || got.Score > 0.5 {
+		t.Errorf("得分 = %v，应只体现引擎排序先验", got.Score)
+	}
+	later := ComputeRelevance(RelevanceInput{Query: "葵司", Title: in.Title, Rank: 3, IndexMatched: true})
+	if later.Score >= got.Score {
+		t.Errorf("引擎排序靠后的结果得分应更低: %v vs %v", later.Score, got.Score)
+	}
+}

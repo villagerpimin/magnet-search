@@ -16,4 +16,6 @@ func RegisterAll(reg *Registry) {
 	RegisterMikan(reg)
 	RegisterAcgRip(reg)
 	RegisterTorrentsCsv(reg)
+	RegisterSukebei(reg)
+	RegisterJavDB(reg)
 }

@@ -9,6 +9,8 @@ import (
 type RelevanceInput struct {
 	// Query 搜索关键词
 	Query string
+	// IndexMatched 表示结果是引擎按自身索引匹配出来的，标题里不一定出现查询词
+	IndexMatched bool
 	// Title 候选标题
 	Title string
 	// Rank 该结果在引擎返回列表中的位置，0 为第一条；-1 表示未知
@@ -122,6 +124,13 @@ func ComputeRelevance(in RelevanceInput) RelevanceResult {
 	case coverage >= relMinCoverage && textRel < relMinTextRel && in.Rank > relMaxPoorRank:
 		res.Passed = false
 		res.Reason = "文本相关度过低且引擎排序靠后"
+	}
+	// 引擎按自身索引匹配过的结果（例如中文演员名检索日文片名）标题里不会出现
+	// 查询词，字面覆盖率必然是 0；这类结果改用引擎排序先验打分，不直接淘汰。
+	if !res.Passed && in.IndexMatched && res.Reason == "没有任何查询词命中" {
+		res.Passed = true
+		res.Reason = ""
+		res.Score = relWeightPrior * prior
 	}
 	return res
 }

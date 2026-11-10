@@ -12,7 +12,6 @@ import (
 	"github.com/pigzhu/magnet-search/internal/aggregate"
 	"github.com/pigzhu/magnet-search/internal/app"
 	"github.com/pigzhu/magnet-search/internal/engine"
-	"github.com/pigzhu/magnet-search/internal/model"
 )
 
 // sseWriter 以 text/event-stream 推送事件。
@@ -189,12 +188,12 @@ func (s *Server) handleCheckStream(w http.ResponseWriter, r *http.Request) {
 
 	var (
 		mu      sync.Mutex
+		sendMu  sync.Mutex
 		okCount int
 		total   = len(specs)
 	)
 
-	engines := make([]engine.Engine, 0, len(specs))
-	meta := make(map[string]engine.Spec, len(specs))
+	built := make(map[string]engine.Engine, len(specs))
 	for _, spec := range specs {
 		e, err := app.BuildEngine(spec, opts)
 		if err != nil {
@@ -206,29 +205,20 @@ func (s *Server) handleCheckStream(w http.ResponseWriter, r *http.Request) {
 			})
 			continue
 		}
-		engines = append(engines, e)
-		meta[spec.Name] = spec
+		built[spec.Name] = e
 	}
 
-	engine.SearchStream(ctx, engines, engine.Options{Query: "ubuntu", Limit: 5}, func(name string, results []model.Result, err error) {
-		spec := meta[name]
-		status := engineStatus{
-			Name:        name,
-			Region:      string(spec.Region),
-			Description: spec.Description,
-			Count:       len(results),
-		}
-		if err != nil {
-			status.Error = err.Error()
-		} else {
-			status.OK = true
-		}
+	probeEngines(ctx, specs, built, func(status engineStatus) {
 		mu.Lock()
 		if status.OK {
 			okCount++
 		}
 		mu.Unlock()
+		// SSE 写入不是并发安全的，但也不能和计数共用一把锁：
+		// 慢客户端会把写卡住，连带其它探针一起等
+		sendMu.Lock()
 		sse.send("engine", status)
+		sendMu.Unlock()
 	})
 
 	sse.send("done", map[string]any{"ok": okCount, "total": total})

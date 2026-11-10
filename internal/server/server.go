@@ -17,7 +17,6 @@ import (
 
 	"github.com/pigzhu/magnet-search/internal/app"
 	"github.com/pigzhu/magnet-search/internal/engine"
-	"github.com/pigzhu/magnet-search/internal/model"
 	"github.com/pigzhu/magnet-search/internal/store"
 )
 
@@ -276,34 +275,26 @@ func (s *Server) handleCheck(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 3*time.Minute)
 	defer cancel()
 
-	engines := make([]engine.Engine, 0, len(specs))
-	meta := make(map[string]engine.Spec, len(specs))
-	for _, spec := range specs {
-		e, err := app.BuildEngine(spec, opts)
-		if err != nil {
-			continue
-		}
-		engines = append(engines, e)
-		meta[spec.Name] = spec
-	}
-
 	var (
 		mu       sync.Mutex
 		statuses = make([]engineStatus, 0, len(specs))
 	)
-	engine.SearchStream(ctx, engines, engine.Options{Query: "ubuntu", Limit: 5}, func(name string, results []model.Result, searchErr error) {
-		spec := meta[name]
-		status := engineStatus{
-			Name:        name,
-			Region:      string(spec.Region),
-			Description: spec.Description,
-			Count:       len(results),
+	built := make(map[string]engine.Engine, len(specs))
+	for _, spec := range specs {
+		e, err := app.BuildEngine(spec, opts)
+		if err != nil {
+			// 构造失败也要回一条状态，否则前端看到的引擎数会对不上 total
+			statuses = append(statuses, engineStatus{
+				Name:        spec.Name,
+				Region:      string(spec.Region),
+				Description: spec.Description,
+				Error:       err.Error(),
+			})
+			continue
 		}
-		if searchErr != nil {
-			status.Error = searchErr.Error()
-		} else {
-			status.OK = true
-		}
+		built[spec.Name] = e
+	}
+	probeEngines(ctx, specs, built, func(status engineStatus) {
 		mu.Lock()
 		statuses = append(statuses, status)
 		mu.Unlock()

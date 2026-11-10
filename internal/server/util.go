@@ -1,9 +1,11 @@
 package server
 
 import (
+	"context"
 	"fmt"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/pigzhu/magnet-search/internal/app"
@@ -68,4 +70,47 @@ func magnetTrackers(uri string) []string {
 func parseBool(s string) bool {
 	v, _ := strconv.ParseBool(s)
 	return v
+}
+
+// 自检（/api/check）的参数。
+const (
+	// probeTimeout 单引擎自检的墙钟预算
+	probeTimeout = 25 * time.Second
+	// probeLimit 自检时每个引擎最多取回的条数
+	probeLimit = 5
+)
+
+// probeEngines 并发跑一遍冒烟查询，每完成一个引擎回调一次状态。
+// 每个引擎用各自的探针词（Spec.ProbeTerm），因此不能直接复用 engine.SearchStream
+// （它只接受一份 Options）。
+func probeEngines(ctx context.Context, specs []engine.Spec, built map[string]engine.Engine, onStatus func(engineStatus)) {
+	var wg sync.WaitGroup
+	for _, spec := range specs {
+		e, ok := built[spec.Name]
+		if !ok {
+			continue
+		}
+		wg.Add(1)
+		go func(spec engine.Spec, e engine.Engine) {
+			defer wg.Done()
+			started := time.Now()
+			searchCtx, cancel := context.WithTimeout(ctx, probeTimeout)
+			defer cancel()
+			results, err := e.Search(searchCtx, engine.Options{Query: spec.ProbeTerm(), Limit: probeLimit})
+			status := engineStatus{
+				Name:        spec.Name,
+				Region:      string(spec.Region),
+				Description: spec.Description,
+				Count:       len(results),
+				ElapsedMS:   time.Since(started).Milliseconds(),
+			}
+			if err != nil {
+				status.Error = err.Error()
+			} else {
+				status.OK = true
+			}
+			onStatus(status)
+		}(spec, e)
+	}
+	wg.Wait()
 }

@@ -37,6 +37,10 @@ type Options struct {
 	Debug bool
 	// Timeout 单个引擎的墙钟预算，0 表示使用默认值
 	Timeout time.Duration
+	// Variant 表示本次调用是拆词检索拆出的变体，不是用户输入的完整查询。
+	// 依赖站点自身索引、每次请求都要渲染页面的引擎可以据此只查完整查询，
+	// 否则「ABCD-999」这类查询会被拆出「999」这种碎片，带回一堆无关结果。
+	Variant bool
 }
 
 // Engine 是所有搜索引擎适配器实现的接口。
@@ -69,8 +73,23 @@ type Spec struct {
 	Description string
 	// Region 网络区域，决定代理优先顺序
 	Region Region
+	// ProbeQuery 自检（/api/check）用的查询词，为空时用默认的 "ubuntu"。
+	// 只对特定查询才真正发请求的引擎必须填它，否则自检会空跑、误报可用。
+	ProbeQuery string
 	// New 构造引擎实例
 	New Factory
+}
+
+// DefaultProbeQuery 是自检（msearch check、/api/check）默认的冒烟查询词。
+const DefaultProbeQuery = "ubuntu"
+
+// ProbeTerm 返回自检使用的查询词：优先用 Spec.ProbeQuery，未配置时用默认词。
+// 只对特定查询才真正发请求的引擎必须设置 ProbeQuery，否则自检会空跑并误报"可用"。
+func (s Spec) ProbeTerm() string {
+	if q := strings.TrimSpace(s.ProbeQuery); q != "" {
+		return q
+	}
+	return DefaultProbeQuery
 }
 
 // Failure 记录某个引擎的失败原因。
@@ -264,6 +283,9 @@ func SearchVariants(ctx context.Context, engines []Engine, opts Options, queries
 					defer inner.Done()
 					variantOpts := opts
 					variantOpts.Query = query
+					// 拆出来的词不等于用户输入的完整查询时标为变体，
+					// 让依赖站点索引的引擎自己决定要不要跟着查
+					variantOpts.Variant = query != opts.Query
 					variantOpts.Limit = variantLimit
 					res, err := e.Search(engineCtx, variantOpts)
 					outcomes[i] = variantOutcome{results: res, err: err}

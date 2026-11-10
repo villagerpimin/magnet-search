@@ -300,7 +300,7 @@ account:
 `mikan` 与 `acgrip` 的 RSS 只给 `.torrent` 地址、不给 info hash，服务会并发下载种子文件并解析；
 为控制请求量，单次检索最多处理 24 条，解析失败的条目会被跳过。
 
-每个引擎都带**镜像兜底**：主域名不可达时自动按顺序换下一个镜像。例如
+多数引擎带**镜像兜底**：主域名不可达时自动按顺序换下一个镜像。例如
 `bt4g` → bt4gprx.com / bt4g.org，`yts` → yts.rs / yts.gg / yts.am，
 `nyaa` → nyaa.si / nyaa.ink。`msearch check` 会显示每个引擎的实际可用域名。
 

@@ -88,6 +88,13 @@ func (a *Nyaa) rssURL(opts Options) string {
 
 // parseRSS 解析 RSS 响应并归一化为结果列表。
 func (a *Nyaa) parseRSS(body []byte) ([]model.Result, error) {
+	return nyaaRSSResults(body, a.Name(), nyaaCategoryGroups)
+}
+
+// nyaaRSSResults 解析 nyaa 系站点（nyaa / sukebei）的 RSS 响应。
+// source 标记来源引擎；groups 是分类编号到大类名的兜底表，
+// 两个站点的分类编号含义不同（sukebei 的 2_x 不是音频），由调用方提供。
+func nyaaRSSResults(body []byte, source string, groups map[string]string) ([]model.Result, error) {
 	raw, err := decodeBody(body)
 	if err != nil {
 		return nil, err
@@ -99,7 +106,7 @@ func (a *Nyaa) parseRSS(body []byte) ([]model.Result, error) {
 	now := time.Now()
 	results := make([]model.Result, 0, len(items))
 	for _, item := range items {
-		res, ok := a.rssResult(item, now)
+		res, ok := nyaaRSSResult(item, now, source, groups)
 		if !ok {
 			continue
 		}
@@ -156,9 +163,9 @@ func nyaaRSSItems(raw []byte) ([]nyaaRSSItem, error) {
 	return items, nil
 }
 
-// rssResult 把 RSS 里的一条记录转成结果。
+// nyaaRSSResult 把 RSS 里的一条记录转成结果。
 // RSS 不直接给磁力链接，只给 info hash，因此这里自己拼一条。
-func (a *Nyaa) rssResult(item nyaaRSSItem, now time.Time) (model.Result, bool) {
+func nyaaRSSResult(item nyaaRSSItem, now time.Time, source string, groups map[string]string) (model.Result, bool) {
 	title := strings.TrimSpace(item.Title)
 	if title == "" {
 		return model.Result{}, false
@@ -174,11 +181,11 @@ func (a *Nyaa) rssResult(item nyaaRSSItem, now time.Time) (model.Result, bool) {
 		Seeders:   nyaaNumber(item.Seeders),
 		Leechers:  nyaaNumber(item.Leechers),
 		ListedAt:  now,
-		Source:    a.Name(),
+		Source:    source,
 		Category:  strings.TrimSpace(item.Category),
 	}
 	if res.Category == "" {
-		res.Category = nyaaCategoryGroup(item.CategoryID)
+		res.Category = nyaaCategoryGroup(item.CategoryID, groups)
 	}
 	if size, ok := nyaaParseSize(item.Size); ok {
 		res.SizeBytes = size
@@ -212,10 +219,11 @@ var nyaaCategoryGroups = map[string]string{
 }
 
 // nyaaCategoryGroup 从分类编号里取大类名，例如 "1_2" 对应 Anime。
-func nyaaCategoryGroup(categoryID string) string {
+// groups 为空表示该站点不套用 nyaa 的分类编号含义。
+func nyaaCategoryGroup(categoryID string, groups map[string]string) string {
 	categoryID = strings.TrimSpace(categoryID)
-	if categoryID == "" {
+	if categoryID == "" || groups == nil {
 		return ""
 	}
-	return nyaaCategoryGroups[strings.SplitN(categoryID, "_", 2)[0]]
+	return groups[strings.SplitN(categoryID, "_", 2)[0]]
 }
