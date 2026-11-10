@@ -300,7 +300,7 @@ func TestFilterLabelsHaveTips(t *testing.T) {
 		}
 	}
 	if labels < 5 {
-		t.Errorf("带提示的筛选项只有 %d 个，应至少覆盖引擎、死链、最少对等端、冷门席位、每簇最多、每页、代理", labels)
+		t.Errorf("带提示的筛选项只有 %d 个，应至少覆盖死链、最少对等端、冷门席位、每簇最多、每页、代理", labels)
 	}
 }
 

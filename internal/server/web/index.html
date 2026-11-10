@@ -111,21 +111,11 @@ header {
   border-radius: 7px; padding: 4px 7px; font: inherit; font-size: 12.5px; outline: none;
 }
 .filters input[type=number] { width: 62px; }
-.filters input[type=text] { background: var(--panel); color: var(--text); border: 1px solid var(--border);
+.filters input[type=text], .filters input[type=password] { background: var(--panel); color: var(--text); border: 1px solid var(--border);
   border-radius: 7px; padding: 4px 8px; font: inherit; font-size: 12.5px; outline: none; min-width: 200px; }
-.filters input[type=text]:focus { border-color: var(--accent); }
+.filters input[type=text]:focus, .filters input[type=password]:focus { border-color: var(--accent); }
 .filters .mini { font-size: 12px; color: var(--muted); border: 1px solid var(--border); border-radius: 7px; padding: 4px 10px; }
 .filters .mini:hover { color: var(--text); border-color: var(--accent); }
-.chips { display: flex; flex-wrap: wrap; gap: 6px; }
-.chip {
-  padding: 3px 10px; border-radius: 999px; border: 1px solid var(--border);
-  background: var(--panel); font-size: 12.5px; color: var(--muted); cursor: pointer;
-  display: inline-flex; align-items: center; gap: 5px;
-}
-.chip.on { background: var(--accent-dim); border-color: var(--accent); color: var(--text); }
-.chip .rdot { width: 6px; height: 6px; border-radius: 50%; background: var(--muted); }
-.chip.on .rdot { background: var(--accent); }
-.chip.overseas .rdot { background: var(--cold); }
 .toggle { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; user-select: none; }
 .toggle input { accent-color: var(--accent); }
 
@@ -423,7 +413,7 @@ main { flex: 1; padding: 4px 20px calc(28px + var(--nav-h) + var(--nav-offset) +
   main { padding: 0 12px calc(22px + var(--nav-h) + var(--nav-offset) + env(safe-area-inset-bottom)); }
   .filters { gap: 7px 10px; padding: 10px 0; font-size: 12px; }
   .filters .grp { gap: 5px; flex-wrap: wrap; }
-  .filters input[type=text] { width: 100%; min-width: 0; }
+  .filters input[type=text], .filters input[type=password] { width: 100%; min-width: 0; }
   .filters select, .filters input[type=number] { font-size: 12px; }
   .tip-bubble { max-width: calc(100vw - 24px); max-height: calc(100vh - 24px); font-size: 12.5px; }
   .status { font-size: 11.5px; gap: 6px 10px; padding: 4px 0 10px; }
@@ -503,7 +493,7 @@ main { flex: 1; padding: 4px 20px calc(28px + var(--nav-h) + var(--nav-offset) +
 
 <div class="searchwrap">
   <div class="searchbar">
-    <input id="q" type="search" placeholder="输入关键词，例如：ubuntu 24.04、葬送のフリーレン、Matrix" autocomplete="off" spellcheck="false">
+    <input id="q" type="search" placeholder="输入关键词" autocomplete="off" spellcheck="false">
     <button id="go" type="button">搜索</button>
   </div>
   <div class="historybar" id="historyBar" style="display:none">
@@ -515,10 +505,7 @@ main { flex: 1; padding: 4px 20px calc(28px + var(--nav-h) + var(--nav-offset) +
     <span id="filtersSummary">筛选</span><span>▾</span>
   </button>
   <div class="filters">
-    <div class="grp">
-      <label class="tip" data-tip="参与检索的引擎。第一个「全部」可一键全选或全不选。&#10;&#10;带橙点的是境外引擎，境内与通用引擎用蓝点。&#10;选择会记在浏览器本地，下次打开保持。">引擎<span class="q">?</span></label>
-      <div class="chips" id="engineChips"></div>
-    </div>
+    <!-- 引擎选择行已隐藏：检索固定使用全部引擎，清单仍由 /api/engines 提供 -->
     <div class="grp">
       <label class="tip" data-tip="被判为「死链」的结果怎么处理。&#10;&#10;隐藏 = 不显示（默认）｜标记 = 显示但打上死链标签｜严格 = 只认正面死亡证据（探测明确返回 0），多引擎一致报 0 也不算死｜不过滤 = 全部显示。&#10;判定死链必须有正面证据，「探测不到」只记为未知，绝不误杀。">死链<span class="q">?</span></label>
       <select id="deadFilter">
@@ -1103,7 +1090,7 @@ function renderFiles(hash, meta) {
   box.innerHTML = html;
 }
 
-/* ---------- 偏好设置：引擎选择与每页条数记在浏览器本地 ---------- */
+/* ---------- 偏好设置：每页条数记在浏览器本地 ---------- */
 function loadPrefs() {
   try {
     const raw = localStorage.getItem("msearch.prefs");
@@ -1114,65 +1101,22 @@ function loadPrefs() {
 function savePrefs() {
   try {
     localStorage.setItem("msearch.prefs", JSON.stringify({
-      engines: [...activeEngines],
       perPage: $("perPage").value,
     }));
   } catch (e) { /* 忽略存储失败 */ }
 }
 
 /* ---------- 引擎清单 ---------- */
+// 引擎选择行已隐藏，检索固定使用全部引擎；这里只取回清单，供状态检测与结果标注使用。
 async function loadEngines() {
   try {
     engines = await (await fetch("/api/engines")).json();
   } catch (e) {
     engines = [];
   }
+  activeEngines = new Set(engines.map((e) => e.name));
   const prefs = loadPrefs();
-  if (prefs && Array.isArray(prefs.engines)) {
-    const known = new Set(engines.map((e) => e.name));
-    activeEngines = new Set(prefs.engines.filter((n) => known.has(n)));
-  } else {
-    activeEngines = new Set(engines.map((e) => e.name));
-  }
   if (prefs && prefs.perPage) $("perPage").value = prefs.perPage;
-  renderEngineChips();
-  updateFiltersSummary();
-}
-
-// renderEngineChips 渲染引擎开关，第一项是"全部"快捷开关。
-function renderEngineChips() {
-  const box = $("engineChips");
-  box.innerHTML = "";
-
-  const all = document.createElement("button");
-  all.type = "button";
-  all.className = "chip" + (activeEngines.size === engines.length && engines.length ? " on" : "");
-  all.textContent = "全部";
-  all.title = "全选或全不选";
-  all.onclick = () => {
-    if (activeEngines.size === engines.length) activeEngines.clear();
-    else activeEngines = new Set(engines.map((e) => e.name));
-    renderEngineChips();
-    savePrefs();
-    updateFiltersSummary();
-  };
-  box.appendChild(all);
-
-  engines.forEach((e) => {
-    const chip = document.createElement("button");
-    chip.type = "button";
-    chip.className = "chip" + (activeEngines.has(e.name) ? " on" : "") + (e.region === "overseas" ? " overseas" : "");
-    chip.innerHTML = `<span class="rdot"></span>${e.name}`;
-    chip.title = `${e.description}（${e.region === "overseas" ? "境外，优先走代理" : "通用"}）`;
-    chip.onclick = () => {
-      if (activeEngines.has(e.name)) activeEngines.delete(e.name);
-      else activeEngines.add(e.name);
-      renderEngineChips();
-      savePrefs();
-      updateFiltersSummary();
-    };
-    box.appendChild(chip);
-  });
 }
 
 /* ---------- 引擎可达性自检：流式，谁先回来先显示 ---------- */
@@ -1885,17 +1829,11 @@ $("gateLogout").onclick = (e) => {
   setBottomTab("home");
 };
 
-// 手机端折叠筛选面板，摘要里显示当前选中几个引擎
-function updateFiltersSummary() {
-  const total = engines.length;
-  const on = activeEngines.size;
-  $("filtersSummary").textContent = on === total ? "筛选（全部引擎）" : `筛选（${on}/${total} 引擎）`;
-}
+// 手机端折叠筛选面板
 $("filtersToggle").onclick = () => {
   const f = document.querySelector(".filters");
   f.classList.toggle("open");
   $("filtersToggle").lastElementChild.textContent = f.classList.contains("open") ? "▴" : "▾";
-  updateFiltersSummary();
 };
 
 // 关闭详情（手机上抽屉铺满整屏，点遮罩点不到，必须有关闭按钮）
